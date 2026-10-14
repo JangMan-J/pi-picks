@@ -159,6 +159,24 @@ class ModelPickerComponent {
 		return this.categories[this.catIndex] ?? "";
 	}
 
+	updateModels(allModels: Model<Api>[], currentModel?: Model<Api>): void {
+		const prevCat = this.categories[this.catIndex];
+		const prevSelected = this.filteredRows[this.rowIndex];
+		this.opts.allModels = allModels;
+		if (currentModel !== undefined) this.opts.currentModel = currentModel;
+		this.byCategory = this.buildCategories();
+		this.categories = Array.from(this.byCategory.keys());
+		const nextCatIdx = prevCat ? this.categories.indexOf(prevCat) : -1;
+		this.catIndex = nextCatIdx >= 0 ? nextCatIdx : Math.min(this.catIndex, Math.max(0, this.categories.length - 1));
+		this.applyFilter();
+		if (prevSelected) {
+			const idx = this.filteredRows.findIndex(
+				(m) => m.id === prevSelected.id && m.provider === prevSelected.provider,
+			);
+			if (idx >= 0) this.rowIndex = idx;
+		}
+	}
+
 	// ── public Focusable propagation ─────────────────────────────────────
 	set focusedState(v: boolean) {
 		this.focused = v;
@@ -506,9 +524,13 @@ export default function modelPickerExtension(pi: ExtensionAPI) {
 	const rememberLastTab = readSetting("rememberLastTab") !== false;
 	let lastTab: ModelPickerOptions["lastTab"];
 	async function openPicker(ctx: ExtensionContext) {
-		// Same logic as /model: refresh from disk, then only models with auth configured
-		ctx.modelRegistry.refresh();
-		const allModels = ctx.modelRegistry.getAvailable();
+		// Same logic as /model: render cached snapshot immediately, refresh in the background
+		const refreshPromise = Promise.resolve(ctx.modelRegistry.refresh());
+		let allModels = ctx.modelRegistry.getAvailable();
+		if (allModels.length === 0) {
+			await refreshPromise.catch(() => {});
+			allModels = ctx.modelRegistry.getAvailable();
+		}
 
 		if (allModels.length === 0) {
 			ctx.ui.notify("No models available", "warning");
@@ -516,8 +538,10 @@ export default function modelPickerExtension(pi: ExtensionAPI) {
 		}
 
 		const selected = await ctx.ui.custom<Model<Api> | null>((tui, theme, _kb, done) => {
+			let closed = false;
 			const close = (model: Model<Api> | null) => {
-				if (rememberLastTab) lastTab = picker.getLastTab();
+				closed = true;
+				if (rememberLastTab) lastTab = model?.provider ?? picker.getLastTab();
 				done(model);
 			};
 			const picker = new ModelPickerComponent({
@@ -531,9 +555,25 @@ export default function modelPickerExtension(pi: ExtensionAPI) {
 			// Give the picker focus so the embedded Input gets IME cursor
 			picker.focusedState = true;
 
+			void refreshPromise
+				.then(() => {
+					if (closed) return;
+					const refreshed = ctx.modelRegistry.getAvailable();
+					if (refreshed.length > 0) {
+						picker.updateModels(refreshed, ctx.model ?? undefined);
+						tui.requestRender();
+					}
+				})
+				.catch(() => {});
+
 			return {
 				// Implement Focusable so pi propagates focus to the Input's cursor
-				focused: true,
+				get focused() {
+					return picker.focused;
+				},
+				set focused(v: boolean) {
+					picker.focusedState = v;
+				},
 
 				render(width: number): string[] {
 					return picker.render(width, theme);
