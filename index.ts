@@ -1,5 +1,5 @@
 /**
- * Model Picker Extension
+ * pi-picks — model picker extension
  *
  * Categorized, keyboard-driven model selector with one global fuzzy query.
  *
@@ -8,7 +8,7 @@
  * switches tab without touching the query. The picker opens on Favorites
  * when any favorite is
  * available. Favorites is this extension's own list, stored as
- * `provider/id` strings under `pi-model-picker.favorites` in
+ * `provider/id` strings under `pi-picks.favorites` in
  * settings.json — independent of pi's native scoped models
  * (`enabledModels`). Ctrl+F toggles the selected model in Favorites
  * from any tab (it stays in its provider tab); Ctrl+X removes the
@@ -22,9 +22,11 @@
  *
  * Configuring the shortcut:
  *   Add to ~/.pi/agent/settings.json:
- *     { "pi-model-picker": { "shortcut": "alt+m" } }
+ *     { "pi-picks": { "shortcut": "alt+m" } }
  *   Accepts a string, an array of strings (binds multiple keys), or `false`
  *   to disable the shortcut entirely (the /models command still works).
+ *   A legacy "pi-model-picker" block is still read and is migrated on the
+ *   next settings write.
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
@@ -39,10 +41,25 @@ import type { Api, Model } from "@mariozechner/pi-ai";
 
 const DEFAULT_SHORTCUT = "ctrl+\\";
 
+const SETTINGS_KEY = "pi-picks";
+/** Settings block name used before the rename; read as a fallback, removed on write. */
+const LEGACY_SETTINGS_KEY = "pi-model-picker";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+/** The extension's settings, with the current block overriding the legacy one. */
+function settingsBlock(raw: unknown): Record<string, unknown> {
+	if (!isRecord(raw)) return {};
+	const legacy = raw[LEGACY_SETTINGS_KEY];
+	const current = raw[SETTINGS_KEY];
+	return { ...(isRecord(legacy) ? legacy : {}), ...(isRecord(current) ? current : {}) };
+}
+
 function readSetting(setting: string): unknown {
 	try {
-		const raw = JSON.parse(readFileSync(join(getAgentDir(), "settings.json"), "utf-8"));
-		return raw?.["pi-model-picker"]?.[setting];
+		return settingsBlock(JSON.parse(readFileSync(join(getAgentDir(), "settings.json"), "utf-8")))[setting];
 	} catch {
 		return undefined; // Missing or malformed settings use defaults.
 	}
@@ -56,21 +73,18 @@ function readFavoriteRefs(): string[] {
 		: [];
 }
 
-/** Write one pi-model-picker setting, preserving everything else in settings.json. */
+/** Write one pi-picks setting, preserving everything else in settings.json. */
 function writeSetting(setting: string, value: unknown): void {
 	const path = join(getAgentDir(), "settings.json");
 	let raw: Record<string, unknown> = {};
 	try {
 		const parsed = JSON.parse(readFileSync(path, "utf-8"));
-		if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) raw = parsed;
+		if (isRecord(parsed)) raw = parsed;
 	} catch {
 		// Missing or malformed settings start from an empty object.
 	}
-	const block = raw["pi-model-picker"];
-	raw["pi-model-picker"] = {
-		...(block && typeof block === "object" && !Array.isArray(block) ? block : {}),
-		[setting]: value,
-	};
+	raw[SETTINGS_KEY] = { ...settingsBlock(raw), [setting]: value };
+	delete raw[LEGACY_SETTINGS_KEY];
 	writeFileSync(path, JSON.stringify(raw, null, 2) + "\n", "utf-8");
 }
 
@@ -871,7 +885,7 @@ export default function modelPickerExtension(pi: ExtensionAPI) {
 		},
 	});
 
-	// Keyboard shortcut(s) — configurable via settings.json ("pi-model-picker": { "shortcut": ... })
+	// Keyboard shortcut(s) — configurable via settings.json ("pi-picks": { "shortcut": ... })
 	const shortcuts = resolveShortcuts();
 	const seen = new Set<string>();
 	for (const shortcut of shortcuts) {

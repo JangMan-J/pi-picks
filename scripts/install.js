@@ -19,10 +19,10 @@ function getAgentDir() {
 }
 
 const agentDir = getAgentDir();
-const EXTENSION_DIR = join(agentDir, "extensions", "model-picker");
+const EXTENSION_DIR = join(agentDir, "extensions", "pi-picks");
 
 function log(msg) {
-	console.log(`[pi-model-picker] ${msg}`);
+	console.log(`[pi-picks] ${msg}`);
 }
 
 function main() {
@@ -70,7 +70,7 @@ function main() {
 	log("");
 	log("Usage:");
 	log("  /models          — open the categorized model picker");
-	log("  Ctrl+Shift+M     — keyboard shortcut");
+	log("  Ctrl+\\           — keyboard shortcut (default)");
 	log("");
 }
 

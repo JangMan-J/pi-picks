@@ -1,10 +1,12 @@
-# pi-model-picker
+# pi-picks
 
-A categorized, keyboard-driven model selector extension for the [pi coding agent](https://github.com/badlogic/pi-mono). Fork of [rilham97/pi-model-picker](https://github.com/rilham97/pi-model-picker), with token costs, aligned metadata, and tab memory.
+[![npm](https://img.shields.io/npm/v/pi-picks)](https://www.npmjs.com/package/pi-picks)
+
+A keyboard-driven model picker extension for the [pi coding agent](https://github.com/badlogic/pi-mono). It started as a fork of [rilham97/pi-model-picker](https://github.com/rilham97/pi-model-picker) and was renamed once it diverged: favorites, one fuzzy query across tabs, token costs, and aligned metadata.
 
 One screen, with tabs as filters over a single list: **Favorites**, **All**, then one tab per provider (A→Z). Typing fuzzy-searches within the current tab. Press `Tab` or `Shift+Tab` to switch tabs without losing your query; the All tab sits beside Favorites when you need to widen. The picker opens on Favorites when any favorite is available, so the usual flow is just open, type a character or two, `Enter`.
 
-The first tab, **Favorites**, is the picker's own list, independent of pi's native scoped models, and the screen the picker opens on. Press `Ctrl+F` on any tab to toggle the selected model in Favorites (it stays in its provider tab too), and `Ctrl+X` to remove the favorites contained in the active tab: every favorite on Favorites or All, or only that provider's favorites on a provider tab. Favorites are marked with a gold `●` outside the Favorites tab. They are stored as `provider/id` strings in `~/.pi/agent/settings.json` under `pi-model-picker.favorites` (hand-editable), in the order added; a favorite whose model is temporarily unavailable is kept and reappears when the model does.
+The first tab, **Favorites**, is the picker's own list, independent of pi's native scoped models, and the screen the picker opens on. Press `Ctrl+F` on any tab to toggle the selected model in Favorites (it stays in its provider tab too), and `Ctrl+X` to remove the favorites contained in the active tab: every favorite on Favorites or All, or only that provider's favorites on a provider tab. Favorites are marked with a gold `●` outside the Favorites tab. They are stored as `provider/id` strings in `~/.pi/agent/settings.json` under `pi-picks.favorites` (hand-editable), in the order added; a favorite whose model is temporarily unavailable is kept and reappears when the model does.
 
 ## Preview
 
@@ -35,24 +37,23 @@ The first tab, **Favorites**, is the picker's own list, independent of pi's nati
 
 ## Install
 
-This fork is not on npm — the `pi-model-picker` npm package is the upstream release. Install this version from git.
-
 ### Via pi package manager (recommended)
 
 ```bash
-pi install git:github.com/JangMan-J/pi-model-picker
+pi install npm:pi-picks
 ```
 
-Restart pi after installation. `pi update --extensions` pulls the latest commits.
+Restart pi after installation. `pi update --extensions` pulls new releases.
 
-### Manual
+### From git
 
 ```bash
-git clone https://github.com/JangMan-J/pi-model-picker.git \
-  ~/.pi/agent/extensions/model-picker
+pi install git:github.com/JangMan-J/pi-picks
 ```
 
-Restart pi.
+### Migrating from pi-model-picker
+
+Remove the old package first so `/models` is not registered twice (`pi remove npm:pi-model-picker` or `pi remove git:github.com/JangMan-J/pi-model-picker`, and delete `~/.pi/agent/extensions/model-picker` if you installed it by hand). Settings under the old `"pi-model-picker"` key in `settings.json` are still read, and move to `"pi-picks"` the next time the picker saves a setting.
 
 ## Usage
 
@@ -69,7 +70,7 @@ By default the picker binds `Ctrl+\`. Override it in `~/.pi/agent/settings.json`
 
 ```json
 {
-  "pi-model-picker": {
+  "pi-picks": {
     "shortcut": "alt+m",
     "rememberLastTab": true
   }
@@ -121,10 +122,13 @@ The picker calls `modelRegistry.refresh()` then `modelRegistry.getAvailable()` �
 ## Uninstall
 
 ```bash
-pi remove git:github.com/JangMan-J/pi-model-picker
-rm -rf ~/.pi/agent/extensions/model-picker
+pi remove npm:pi-picks
 ```
+
+## Releasing
+
+Every push to `main` runs `npm run check`. When `package.json` has a version that is not on npm yet, CI publishes it with npm trusted publishing (OIDC, with provenance), then tags `v<version>` and creates a GitHub release from that version's `CHANGELOG.md` section. To release: bump `version`, rename the `## Unreleased` heading to `## <version> — <date>`, and push.
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).

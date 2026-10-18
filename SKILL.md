@@ -1,14 +1,13 @@
 ---
-name: model-picker
+name: pi-picks
 description: Categorized model selector for pi. Use /models or Ctrl+\ to open a single-screen TUI picker with tabs as filters — Favorites first (the picker's own stored list and the opening screen), then All, then one tab per provider. Type to fuzzy-search within the current tab, Tab or ← → to switch tabs keeping the query, ↑↓ to navigate, Ctrl+F to toggle the selected model in Favorites, Ctrl+X to remove favorites contained in the active tab, Enter to select and save the startup default.
 license: MIT
 compatibility: Requires pi coding agent with auth configured for at least one model provider.
 metadata:
-  author: rilham97
-  version: "1.0.0"
+  author: JangMan-J
 ---
 
-# Model Picker
+# pi-picks
 
 Open the categorized model picker with `/models` or `Ctrl+\`.
 
