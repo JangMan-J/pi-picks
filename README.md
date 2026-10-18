@@ -2,7 +2,9 @@
 
 A categorized, keyboard-driven model selector extension for the [pi coding agent](https://github.com/badlogic/pi-mono). Fork of [rilham97/pi-model-picker](https://github.com/rilham97/pi-model-picker), with token costs, aligned metadata, and tab memory.
 
-Models are grouped by inference provider in horizontal tabs. Press `Tab` or `Shift+Tab` to switch categories. Type to filter within a category and navigate with `↑`/`↓`.
+One screen, with tabs as filters over a single list: **Favorites**, **All**, then one tab per provider (A→Z). Typing fuzzy-searches within the current tab. Press `Tab` or `Shift+Tab` to switch tabs without losing your query; the All tab sits beside Favorites when you need to widen. The picker opens on Favorites when any favorite is available, so the usual flow is just open, type a character or two, `Enter`.
+
+The first tab, **Favorites**, is the picker's own list, independent of pi's native scoped models, and the screen the picker opens on. Press `Ctrl+F` on any tab to toggle the selected model in Favorites (it stays in its provider tab too), and `Ctrl+X` to remove the favorites contained in the active tab: every favorite on Favorites or All, or only that provider's favorites on a provider tab. Favorites are marked with a gold `●` outside the Favorites tab. They are stored as `provider/id` strings in `~/.pi/agent/settings.json` under `pi-model-picker.favorites` (hand-editable), in the order added; a favorite whose model is temporarily unavailable is kept and reappears when the model does.
 
 ## Preview
 
@@ -10,24 +12,25 @@ Models are grouped by inference provider in horizontal tabs. Press `Tab` or `Shi
 ───────────────────────────────────────────────────────────────────
   Select Model
 ───────────────────────────────────────────────────────────────────
-  Anthropic │ Antigravity │ Fireworks │ Openrouter │ Xai
+  Favorites │ All │ Anthropic │ Antigravity │ Fireworks │ Xai
 ───────────────────────────────────────────────────────────────────
   Search: > claude_
 
-▶ Claude Sonnet ●                      $3/$15  200k  thinking  vision
-  Claude Opus                          $5/$25  200k  thinking  vision
+▶ Claude Sonnet ●  [Anthropic]         $3/$15  200k  thinking  vision
 
-  (1/2) claude-sonnet
+  (1/1) anthropic/claude-sonnet
 ───────────────────────────────────────────────────────────────────
-  ↑↓ / Enter select · Tab provider · Ctrl+F fuzzy · Esc/Ctrl+C cancel
+  ↑↓ Enter select model · ←→ Tab select menu · Ctrl+F toggle favorite · Ctrl+X clear favorites · Esc cancel
 ───────────────────────────────────────────────────────────────────
 ```
 
-- **Active model** shown with `●` and highlighted in green
+- **Active model** highlighted in green with a green `●`; if it is also a favorite, the `●` is gold (on every tab, including Favorites)
 - **Context window** shown as `200k`, `1M`, etc.
 - **Capability tags**: `thinking` (extended reasoning), `vision` (image input)
-- **Search** filters by model name or id within the current category
-- **Search term preserved** per category — switch away and back, your query is still there
+- **Search** fuzzy-matches model name, id, and provider within the current tab
+- **Ranked search highlights** — matching tabs and rows get a subtle neutral background, while the best-ranked result gets a distinct search-match background separate from the selected tab highlight
+- **One query everywhere** — switching tabs keeps your query and, when it survives, your selection
+- **Duplicates side by side** — on the All tab the same model from several providers sits adjacently, so cost and context differences are easy to compare
 - **Wraparound navigation** — `↑` on the first item jumps to the last, and vice versa
 
 ## Install
@@ -56,18 +59,18 @@ Restart pi.
 | Trigger | Description |
 |---------|-------------|
 | `/models` | Open the categorized picker |
-| `Ctrl+Shift+M` | Keyboard shortcut (default, configurable) |
+| Ctrl+\ | Keyboard shortcut (default, configurable) |
 
 > **Note:** `/model` is a built-in pi command and cannot be overridden. Use `/models` (with an `s`) for this picker. The built-in `/model` (flat search) continues to work as normal.
 
 ### Configuring the shortcut
 
-By default the picker binds `Ctrl+Shift+M`. Override it in `~/.pi/agent/settings.json`:
+By default the picker binds `Ctrl+\`. Override it in `~/.pi/agent/settings.json`:
 
 ```json
 {
   "pi-model-picker": {
-    "shortcut": "ctrl+l",
+    "shortcut": "alt+m",
     "rememberLastTab": true
   }
 }
@@ -75,8 +78,8 @@ By default the picker binds `Ctrl+Shift+M`. Override it in `~/.pi/agent/settings
 
 `shortcut` accepts:
 
-- a single key string, e.g. `"ctrl+l"`
-- an array of key strings to bind multiple keys, e.g. `["ctrl+l", "ctrl+shift+m"]`
+- a single key string, e.g. `"alt+m"`
+- an array of key strings to bind multiple keys, e.g. ["alt+m", "ctrl+\\"]
 - `false` to disable the shortcut entirely (the `/models` command still works)
 
 See pi's [keybindings docs](https://github.com/badlogic/pi-mono) for the key identifier format (`ctrl`, `shift`, `alt` modifiers combined with letters, digits, or symbols).
@@ -85,17 +88,14 @@ Restart pi (or run `/reload`) after changing `settings.json`.
 
 ### Last tab
 
-`rememberLastTab` accepts `true` or `false` and defaults to `true`.
-The picker remembers the provider tab after selection or cancellation.
-This state stays in memory while pi is running. Restarting pi or using `/reload` clears it.
-No state file is used. Search text is not saved.
+The picker opens on **Favorites** when any favorite is available. Otherwise, with `rememberLastTab` (default `true`) it reopens the tab it last closed on; this state stays in memory while pi is running — restarting pi or using `/reload` clears it, and no state file is used. Search text is not saved.
 
-With `rememberLastTab: false`, the picker always starts on the current model's provider tab.
+With `rememberLastTab: false` and no available favorites, the picker starts on the current model's provider tab.
 If the saved tab is unavailable, the picker uses the current model's tab.
 
-### Global fuzzy search
+### Searching beyond the current tab
 
-`Ctrl+F` toggles fuzzy search across all providers while preserving the query.
+Every tab uses the same fuzzy search; tabs only narrow which models it runs over. Move to the All tab when the current tab has no match (the empty state tells you when matches exist elsewhere). With a query active, matching tabs get green text on a subtle violet background, matching rows get a subtle neutral background, and the best-ranked row (first after fuzzy sorting) gets a distinct search-match background; the selected tab keeps its separate selected background. `Tab` skips provider tabs that have no matches; Favorites and All are always stops. Favorites and All stay visible when the provider tabs overflow the bar; the `<<` / `>>` markers show what is hidden on each side.
 
 ## Controls
 
@@ -103,10 +103,11 @@ If the saved tab is unavailable, the picker uses the current model's tab.
 |-----|--------|
 | `↑` / `↓` | Navigate models (wraps around) |
 | `Shift+↑` / `Shift+↓` | Move up / down 10 models, stopping at the first or last result |
-| `Ctrl+F` | Toggle provider-scoped search / global fuzzy search |
-| `Tab` / `Shift+Tab` | Switch category, or jump between matching providers in fuzzy mode |
-| `←` / `→` | Switch category when scoped search is empty; otherwise move the text cursor |
-| Type | Filter the current category, or fuzzy-search all providers |
+| `Tab` / `Shift+Tab` | Switch tab (Favorites, All, then providers); with a query active, provider tabs with no matches are skipped |
+| `Ctrl+F` | Toggle the selected model in Favorites, on any tab |
+| `Ctrl+X` | Remove favorites contained in the active tab (every favorite on Favorites; only the relevant provider's favorites on a provider tab) |
+| `←` / `→` | Switch tab when the search field is empty; otherwise move the text cursor |
+| Type | Fuzzy-filter the current tab |
 | `Enter` | Select highlighted model and save it as the default for new sessions |
 | `Esc` / `Ctrl+C` | Cancel |
 
@@ -115,7 +116,7 @@ It preserves other settings, including the default thinking level.
 
 ## How it works
 
-The picker calls `modelRegistry.refresh()` then `modelRegistry.getAvailable()` — the same data source as pi's built-in `/model` command. Only models with auth configured (API key or OAuth) are shown. Models are grouped by their `provider` field and sorted alphabetically within each category, with the currently active model's provider appearing first.
+The picker calls `modelRegistry.refresh()` then `modelRegistry.getAvailable()` — the same data source as pi's built-in `/model` command. Only models with auth configured (API key or OAuth) are shown. Models are grouped by their `provider` field into provider tabs in A→Z order, sorted alphabetically within each tab with the active model first. The All tab instead sorts by model name, then provider, so duplicates offered by several providers sit together.
 
 ## Uninstall
 

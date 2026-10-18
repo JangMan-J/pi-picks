@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Change the default picker shortcut from Ctrl+Shift+M to Ctrl+\ (unbound in pi; configurable via pi-model-picker.shortcut)
+
+- Merge the tabbed and fuzzy screens into one: tabs are facets (Favorites, All, then providers A→Z) over a single global fuzzy query. Tab switches tabs without touching the query (skipping no-match provider tabs while a query is active); selection follows the model across tab switches. Active searches add a subtle violet background to matching tabs and a subtle neutral background to matching rows, with a distinct search-match background for the top-ranked row. Favorites and All stay pinned when provider tabs overflow, with `<<` / `>>` overflow markers. The All tab sorts same-model duplicates adjacently, the details line shows provider/id on cross-provider tabs, and favorites carry a gold ● marker outside the Favorites tab (the active model's ● turns gold when it is also a favorite)
+- Add a Favorites tab (first tab, and the opening screen when any favorite is available) with provider-labelled rows; the list is the extension's own, stored under `pi-model-picker.favorites` in settings.json, independent of pi's native scoped models
+- Add Ctrl+F to toggle the selected model in Favorites from any tab (it stays in its provider tab; Ctrl+S was dropped because multiplexers intercept it), and Ctrl+X to remove favorites contained in the active tab (provider-scoped on provider tabs; full clear on Favorites)
+
 - Report an incomplete installation and fail the command if an extension file cannot be copied
 - Keep rendered lines within the terminal width during very narrow resizes
 - Use Pi's agent-directory resolver so tilde paths and empty overrides follow Pi's settings behavior

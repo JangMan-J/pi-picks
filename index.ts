@@ -1,34 +1,43 @@
 /**
  * Model Picker Extension
  *
- * Categorized, keyboard-driven model selector with per-category search.
+ * Categorized, keyboard-driven model selector with one global fuzzy query.
  *
- * Tab/Shift+Tab switch provider categories.
+ * Tabs are facets over a single list: Favorites, All, then one per
+ * provider (A→Z). Typing fuzzy-searches within the current tab; Tab
+ * switches tab without touching the query. The picker opens on Favorites
+ * when any favorite is
+ * available. Favorites is this extension's own list, stored as
+ * `provider/id` strings under `pi-model-picker.favorites` in
+ * settings.json — independent of pi's native scoped models
+ * (`enabledModels`). Ctrl+F toggles the selected model in Favorites
+ * from any tab (it stays in its provider tab); Ctrl+X removes the
+ * favorites contained in the active tab (every favorite on Favorites).
  *
  * Usage:
  *   /models          — open the categorized picker
- *   Ctrl+Shift+M     — keyboard shortcut (default; configurable, see below)
+ *   Ctrl+\           — keyboard shortcut (default; configurable, see below)
  *
  * Note: /model is a built-in pi command and cannot be overridden.
  *
  * Configuring the shortcut:
  *   Add to ~/.pi/agent/settings.json:
- *     { "pi-model-picker": { "shortcut": "ctrl+l" } }
+ *     { "pi-model-picker": { "shortcut": "alt+m" } }
  *   Accepts a string, an array of strings (binds multiple keys), or `false`
  *   to disable the shortcut entirely (the /models command still works).
  */
 
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getAgentDir, SettingsManager } from "@mariozechner/pi-coding-agent";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { Input, Key, fuzzyFilter, matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@mariozechner/pi-tui";
+import { Input, Key, fuzzyFilter, matchesKey, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 import type { KeyId } from "@mariozechner/pi-tui";
 import type { Api, Model } from "@mariozechner/pi-ai";
 
 // ─── settings ───────────────────────────────────────────────────────────────
 
-const DEFAULT_SHORTCUT = "ctrl+shift+m";
+const DEFAULT_SHORTCUT = "ctrl+\\";
 
 function readSetting(setting: string): unknown {
 	try {
@@ -37,6 +46,32 @@ function readSetting(setting: string): unknown {
 	} catch {
 		return undefined; // Missing or malformed settings use defaults.
 	}
+}
+
+/** Stored favorites as `provider/id` refs, in the order they were added. */
+function readFavoriteRefs(): string[] {
+	const favorites = readSetting("favorites");
+	return Array.isArray(favorites)
+		? favorites.filter((f): f is string => typeof f === "string" && f.length > 0)
+		: [];
+}
+
+/** Write one pi-model-picker setting, preserving everything else in settings.json. */
+function writeSetting(setting: string, value: unknown): void {
+	const path = join(getAgentDir(), "settings.json");
+	let raw: Record<string, unknown> = {};
+	try {
+		const parsed = JSON.parse(readFileSync(path, "utf-8"));
+		if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) raw = parsed;
+	} catch {
+		// Missing or malformed settings start from an empty object.
+	}
+	const block = raw["pi-model-picker"];
+	raw["pi-model-picker"] = {
+		...(block && typeof block === "object" && !Array.isArray(block) ? block : {}),
+		[setting]: value,
+	};
+	writeFileSync(path, JSON.stringify(raw, null, 2) + "\n", "utf-8");
 }
 
 /** Accept a key, multiple keys, or false/[] to disable. */
@@ -96,12 +131,24 @@ function fmtCost(cost: { input: number; output: number }): string {
 
 // ─── component ──────────────────────────────────────────────────────────────
 
+/** Tab keys for the cross-provider tabs. Sentinels so they cannot collide with a provider id. */
+const FAVORITES_TAB = "\0favorites";
+const ALL_TAB = "\0all";
+
+const modelRef = (m: Model<Api>): string => `${m.provider}\0${m.id}`;
+
 interface ModelPickerOptions {
 	allModels: Model<Api>[];
+	/** Stored favorites resolved against the catalogue, in stored order. */
+	favorites: Model<Api>[];
 	currentModel: Model<Api> | undefined;
 	lastTab?: string;
 	onSelect: (model: Model<Api>) => void;
 	onCancel: () => void;
+	onAddToFavorite: (model: Model<Api>) => void;
+	onRemoveFavorite: (model: Model<Api>) => void;
+	onRemoveFavorites: (models: Model<Api>[]) => void;
+	onClearFavorites: () => void;
 }
 
 class ModelPickerComponent {
@@ -111,14 +158,26 @@ class ModelPickerComponent {
 	private categories: string[];
 	private catIndex: number;
 	private rowIndex = 0;
-	private fuzzy = false;
 	private matchingProviders = new Set<string>();
+
+	// Favorite models in stored order; mutated locally by Ctrl+F/Ctrl+X
+	private favorites: Model<Api>[];
+
+	// Fuzzy matches across every provider for the current query (drives tab
+	// highlighting, match-only Tab stops, and widen hints)
+	private globalMatches: Model<Api>[] = [];
+
+	// First provider shown in the windowed part of the tab bar (index into
+	// categories); adjusted minimally so the active provider stays visible
+	private providerLo = 0;
+
 
 	// per-category source models (sorted, never mutated)
 	private byCategory: Map<string, Model<Api>[]>;
 
-	// per-category search terms (reset when category changes, preserved when returning)
-	private searchTerms: Map<string, string> = new Map();
+	// every model, sorted by display label then provider so the same model
+	// offered by several providers sits adjacently on the All tab
+	private allSorted: Model<Api>[] = [];
 
 	// the search Input widget
 	private searchInput: Input;
@@ -129,12 +188,15 @@ class ModelPickerComponent {
 	constructor(private opts: ModelPickerOptions) {
 		this.byCategory = this.buildCategories();
 		this.categories = Array.from(this.byCategory.keys());
+		this.favorites = [...opts.favorites];
 
-		// Restore the saved tab if available, otherwise follow the current model.
+		// Home is Favorites when any favorite is available; otherwise restore
+		// the saved tab if available, otherwise follow the current model.
 		const cur = opts.currentModel;
-		const startCat = opts.lastTab && this.byCategory.has(opts.lastTab)
-			? opts.lastTab : cur?.provider ?? this.categories[0];
-		this.catIndex = Math.max(0, this.categories.indexOf(startCat ?? ""));
+		const startTab = this.favorites.length > 0 ? FAVORITES_TAB
+			: opts.lastTab && this.tabs.includes(opts.lastTab) ? opts.lastTab
+			: cur?.provider ?? ALL_TAB;
+		this.catIndex = Math.max(0, this.tabs.indexOf(startTab));
 
 		// Build the search Input
 		this.searchInput = new Input();
@@ -155,19 +217,48 @@ class ModelPickerComponent {
 		}
 	}
 
+	/** All tabs: Favorites, All, then one per provider (A→Z). */
+	private get tabs(): string[] {
+		return [FAVORITES_TAB, ALL_TAB, ...this.categories];
+	}
+
+	/** True for tabs whose rows span providers (they show the provider column). */
+	private get crossProvider(): boolean {
+		const tab = this.currentTab();
+		return tab === FAVORITES_TAB || tab === ALL_TAB;
+	}
+
+	private currentTab(): string {
+		return this.tabs[this.catIndex] ?? FAVORITES_TAB;
+	}
+
+	private onFavoritesTab(): boolean {
+		return this.currentTab() === FAVORITES_TAB;
+	}
+
+	private isFavorite(model: Model<Api>): boolean {
+		return this.favorites.some((m) => modelRef(m) === modelRef(model));
+	}
+
 	getLastTab() {
-		return this.categories[this.catIndex] ?? "";
+		return this.currentTab();
 	}
 
 	updateModels(allModels: Model<Api>[], currentModel?: Model<Api>): void {
-		const prevCat = this.categories[this.catIndex];
+		const prevTab = this.currentTab();
 		const prevSelected = this.filteredRows[this.rowIndex];
 		this.opts.allModels = allModels;
 		if (currentModel !== undefined) this.opts.currentModel = currentModel;
 		this.byCategory = this.buildCategories();
 		this.categories = Array.from(this.byCategory.keys());
-		const nextCatIdx = prevCat ? this.categories.indexOf(prevCat) : -1;
-		this.catIndex = nextCatIdx >= 0 ? nextCatIdx : Math.min(this.catIndex, Math.max(0, this.categories.length - 1));
+		// Remap favorites onto refreshed objects, dropping unavailable ones.
+		const refreshed = new Map(allModels.map((m) => [modelRef(m), m]));
+		this.favorites = this.favorites.flatMap((m) => {
+			const next = refreshed.get(modelRef(m));
+			return next ? [next] : [];
+		});
+		const nextTabIdx = this.tabs.indexOf(prevTab);
+		this.catIndex = nextTabIdx >= 0 ? nextTabIdx : Math.min(this.catIndex, Math.max(0, this.tabs.length - 1));
 		this.applyFilter();
 		if (prevSelected) {
 			const idx = this.filteredRows.findIndex(
@@ -204,77 +295,131 @@ class ModelPickerComponent {
 			});
 		}
 
-		// Sort categories: active provider first, then alphabetical
-		return new Map(
-			[...map.entries()].sort(([aKey], [bKey]) => {
-				const aCur = cur && aKey === cur.provider ? -1 : 0;
-				const bCur = cur && bKey === cur.provider ? -1 : 0;
-				if (aCur !== bCur) return aCur - bCur;
-				return aKey.localeCompare(bKey);
-			}),
+		// Provider tabs keep a stable A→Z order; the picker opens on the
+		// relevant tab directly, so promoting the current provider would
+		// only rearrange the bar whenever the model changes.
+		const sorted = new Map(
+			[...map.entries()].sort(([aKey], [bKey]) => aKey.localeCompare(bKey)),
 		);
+
+		// All-tab order: display label, then provider — duplicate models
+		// offered by several providers end up adjacent for comparison.
+		this.allSorted = [...map.values()].flat().sort((a, b) =>
+			modelLabel(a).localeCompare(modelLabel(b))
+			|| a.provider.localeCompare(b.provider)
+			|| a.id.localeCompare(b.id));
+		return sorted;
 	}
 
 	// ── filtering ────────────────────────────────────────────────────────
 
-	private searchKey(): string {
-		return this.categories[this.catIndex] ?? "";
+	private tabLabel(key: string): string {
+		return key === FAVORITES_TAB ? "Favorites" : key === ALL_TAB ? "All" : providerLabel(key);
+	}
+
+	/** Source rows for a tab before the query is applied. */
+	private tabSource(tabKey: string): Model<Api>[] {
+		return tabKey === FAVORITES_TAB ? this.favorites
+			: tabKey === ALL_TAB ? this.allSorted
+			: this.byCategory.get(tabKey) ?? [];
 	}
 
 	private applyFilter(): void {
-		const catKey = this.categories[this.catIndex] ?? "";
-		const source = this.fuzzy ? [...this.byCategory.values()].flat() : this.byCategory.get(catKey) ?? [];
-		const query = this.searchInput.getValue().toLowerCase().trim();
-
-		if (this.fuzzy) {
-			this.filteredRows = fuzzyFilter(source, query, (m) => `${m.name} ${m.id} ${m.provider}`);
-		} else if (!query) {
-			this.filteredRows = source;
-		} else {
-			this.filteredRows = source.filter(
-				(m) =>
-					m.name.toLowerCase().includes(query) ||
-					m.id.toLowerCase().includes(query) ||
-					m.provider.toLowerCase().includes(query),
-			);
-		}
-		this.matchingProviders = new Set(this.filteredRows.map((m) => m.provider));
+		const query = this.searchInput.getValue().trim();
+		const searchText = (m: Model<Api>) => `${m.name} ${m.id} ${m.provider}`;
+		// fuzzyFilter returns the source untouched for an empty query, so
+		// browsing keeps each tab's source order (favorites: stored order).
+		this.globalMatches = fuzzyFilter(this.allSorted, query, searchText);
+		this.filteredRows = fuzzyFilter(this.tabSource(this.currentTab()), query, searchText);
+		this.matchingProviders = new Set(this.globalMatches.map((m) => m.provider));
 		// Clamp row selection
 		this.rowIndex = Math.max(0, Math.min(this.rowIndex, this.filteredRows.length - 1));
 	}
 
+	/**
+	 * Move to another tab, keeping the query and, when it survives the
+	 * switch, the selected model. With a query active, provider tabs with
+	 * no matches are skipped; Favorites and All are always stops.
+	 */
 	private switchCategory(delta: number): void {
-		if (!this.categories.length) return;
-		if (this.fuzzy) {
-			const providers = this.categories.filter((p) => this.matchingProviders.has(p));
-			if (!providers.length) return;
-			const current = providers.indexOf(this.filteredRows[this.rowIndex]!.provider);
-			const next = providers[(current + delta + providers.length) % providers.length];
-			this.rowIndex = this.filteredRows.findIndex((m) => m.provider === next);
+		const tabs = this.tabs;
+		const query = this.searchInput.getValue().trim();
+		const visitable = tabs.filter((tab) =>
+			!query || tab === FAVORITES_TAB || tab === ALL_TAB || this.matchingProviders.has(tab));
+		if (!visitable.length) return;
+		const prevSelected = this.filteredRows[this.rowIndex];
+		// Walk the full tab order from the current position so a current tab
+		// that lost its matches still advances to the next visitable one.
+		let idx = this.catIndex;
+		for (let step = 0; step < tabs.length; step++) {
+			idx = (idx + delta + tabs.length) % tabs.length;
+			if (visitable.includes(tabs[idx]!)) break;
+		}
+		this.catIndex = idx;
+		this.applyFilter();
+		const kept = prevSelected
+			? this.filteredRows.findIndex((m) => modelRef(m) === modelRef(prevSelected))
+			: -1;
+		this.rowIndex = kept >= 0 ? kept : 0;
+	}
+
+	// ── favorites mutations ──────────────────────────────────────────────
+
+	/**
+	 * Ctrl+F: toggle the selected model in Favorites. Adding keeps it in its
+	 * provider tab; removing on the Favorites tab drops the row and keeps
+	 * the cursor at the same position.
+	 */
+	private toggleSelectedFavorite(): void {
+		const selected = this.filteredRows[this.rowIndex];
+		if (!selected) return;
+		// No status line: the row's colour and dot are the feedback, so the
+		// picker keeps a fixed height.
+		if (this.isFavorite(selected)) {
+			this.favorites = this.favorites.filter((m) => modelRef(m) !== modelRef(selected));
+			this.opts.onRemoveFavorite(selected);
+		} else {
+			this.favorites.push(selected);
+			this.opts.onAddToFavorite(selected);
+		}
+		this.applyFilter();
+	}
+
+	/**
+	 * Ctrl+X: remove favorites contained in the active tab. Scope is the
+	 * tab's unfiltered source list, not just the rows matched by the query:
+	 * provider tabs lose only that provider's favorites and All loses every
+	 * resolved favorite. The Favorites tab retains its full clear, including
+	 * stored refs whose models are temporarily unavailable.
+	 */
+	private clearFavoritesInTab(): void {
+		if (!this.favorites.length) return;
+		if (this.onFavoritesTab()) {
+			this.favorites = [];
+			this.opts.onClearFavorites();
+			this.rowIndex = 0;
+			this.applyFilter();
 			return;
 		}
-		// Save current search term for this category before leaving
-		this.searchTerms.set(this.searchKey(), this.searchInput.getValue());
-
-		this.catIndex =
-			(this.catIndex + delta + this.categories.length) % this.categories.length;
-
-		// Restore search term for new category
-		const saved = this.searchTerms.get(this.searchKey()) ?? "";
-		this.searchInput.setValue(saved);
-
-		this.rowIndex = 0;
+		const contained = new Set(this.tabSource(this.currentTab()).map(modelRef));
+		const removed = this.favorites.filter((m) => contained.has(modelRef(m)));
+		if (!removed.length) return;
+		const removedRefs = new Set(removed.map(modelRef));
+		this.favorites = this.favorites.filter((m) => !removedRefs.has(modelRef(m)));
+		this.opts.onRemoveFavorites(removed);
 		this.applyFilter();
 	}
 
 	// ── input handling ───────────────────────────────────────────────────
 
 	handleInput(data: string): void {
+		// Favorite toggle works on every tab; the model stays in its provider tab.
 		if (matchesKey(data, Key.ctrl("f"))) {
-			this.fuzzy = !this.fuzzy;
-			if (!this.fuzzy) this.searchTerms.set(this.searchKey(), this.searchInput.getValue());
-			this.rowIndex = 0;
-			this.applyFilter();
+			this.toggleSelectedFavorite();
+			return;
+		}
+		if (matchesKey(data, Key.ctrl("x"))) {
+			this.clearFavoritesInTab();
 			return;
 		}
 		if (matchesKey(data, Key.tab)) {
@@ -312,13 +457,13 @@ class ModelPickerComponent {
 			return;
 		}
 
-		// ← at start of empty field — switch category left
-		if (!this.fuzzy && matchesKey(data, Key.left) && this.searchInput.getValue() === "") {
+		// ← with an empty field — switch tab left
+		if (matchesKey(data, Key.left) && this.searchInput.getValue() === "") {
 			this.switchCategory(-1);
 			return;
 		}
-		// → at end of empty field — switch category right
-		if (!this.fuzzy && matchesKey(data, Key.right) && this.searchInput.getValue() === "") {
+		// → with an empty field — switch tab right
+		if (matchesKey(data, Key.right) && this.searchInput.getValue() === "") {
 			this.switchCategory(1);
 			return;
 		}
@@ -329,8 +474,6 @@ class ModelPickerComponent {
 		const after = this.searchInput.getValue();
 
 		if (before !== after) {
-			// Global typing must not overwrite saved queries on other tabs.
-			if (!this.fuzzy) this.searchTerms.set(this.searchKey(), after);
 			this.rowIndex = 0;
 			this.applyFilter();
 		}
@@ -350,8 +493,8 @@ class ModelPickerComponent {
 
 		// ── search field ─────────────────────────────────────────────────
 		lines.push(theme.fg("border", "─".repeat(width)));
-		const promptText = this.fuzzy ? "  Fuzzy: " : "  Search: ";
-		const prompt = theme.fg(this.fuzzy ? "accent" : "muted", promptText);
+		const promptText = "  Search: ";
+		const prompt = theme.fg("muted", promptText);
 		const promptW = visibleWidth(promptText);
 		const inputLines = this.searchInput.render(Math.max(0, width - promptW));
 		lines.push(prompt + (inputLines[0] ?? ""));
@@ -362,21 +505,36 @@ class ModelPickerComponent {
 		const MAX_VISIBLE = 10;
 		const half = Math.floor(MAX_VISIBLE / 2);
 		const rows = this.filteredRows;
+		const hasQuery = this.searchInput.getValue().trim() !== "";
 		const start = Math.max(0, Math.min(this.rowIndex - half, rows.length - MAX_VISIBLE));
 		const visible = rows.slice(start, start + MAX_VISIBLE);
 
 		if (rows.length === 0) {
-			const query = this.searchInput.getValue();
-			const msg = query
-				? `  No models match "${query}"`
-				: this.fuzzy ? "  No models available" : "  No models in this category";
+			const query = this.searchInput.getValue().trim();
+			const tab = this.currentTab();
+			let msg: string;
+			if (query && tab !== ALL_TAB && this.globalMatches.length > 0) {
+				// Matches exist outside this tab — point at the way to widen.
+				const scope = tab === FAVORITES_TAB ? "favorites" : `${providerLabel(tab)} models`;
+				msg = `  No ${scope} match "${query}" — Tab to search all ${this.allSorted.length} models`;
+			} else if (query) {
+				msg = `  No models match "${query}"`;
+			} else if (tab === FAVORITES_TAB) {
+				msg = "  No favorites yet — Tab to browse; Ctrl+F favorites the selected model";
+			} else if (tab === ALL_TAB) {
+				msg = "  No models available";
+			} else {
+				msg = "  No models in this category";
+			}
 			lines.push(theme.fg("muted", truncateToWidth(msg, width)));
 		} else {
-			// Use every fuzzy match so columns do not move when the list scrolls.
-			const measured = this.fuzzy ? rows : visible;
+			// Cross-provider tabs (Favorites, All) show the provider column.
+			const showProvider = this.crossProvider;
+			// Measure over every row so columns do not move when the list scrolls.
+			const measured = showProvider ? rows : visible;
 			const colW = {
-				name: this.fuzzy ? Math.max(...rows.map((m) => visibleWidth(modelLabel(m)))) : 0,
-				provider: this.fuzzy ? Math.max(...rows.map((m) => visibleWidth(`[${providerLabel(m.provider)}]`))) : 0,
+				name: showProvider ? Math.max(...rows.map((m) => visibleWidth(modelLabel(m)))) : 0,
+				provider: showProvider ? Math.max(...rows.map((m) => visibleWidth(`[${providerLabel(m.provider)}]`))) : 0,
 				cost: Math.max(0, ...measured.map((m) => visibleWidth(fmtCost(m.cost)))),
 				ctx: Math.max(0, ...measured.map((m) => visibleWidth(m.contextWindow ? fmtCtx(m.contextWindow) : ""))),
 				thinking: measured.some((m) => m.reasoning) ? "thinking".length : 0,
@@ -385,7 +543,7 @@ class ModelPickerComponent {
 			// Keep the model and provider identifiable before showing optional metadata.
 			for (const column of ["cost", "vision", "thinking", "ctx"] as const) {
 				const infoWidth = Math.max(0, [colW.cost, colW.ctx, colW.thinking, colW.vision].filter(Boolean).reduce((sum, n) => sum + n + 2, -2));
-				const labelWidth = this.fuzzy ? colW.name + colW.provider + 8 : 16;
+				const labelWidth = showProvider ? colW.name + colW.provider + 8 : 16;
 				if (infoWidth + labelWidth <= width) break;
 				colW[column] = 0;
 			}
@@ -396,19 +554,32 @@ class ModelPickerComponent {
 				const isCurrent =
 					this.opts.currentModel?.id === model.id &&
 					this.opts.currentModel?.provider === model.provider;
-				lines.push(this.renderRow(model, isSelected, isCurrent, width, theme, colW));
+				// fuzzyFilter sorts by score, so visible order is rank order:
+				// row 0 is the best match for the active query.
+				const fuzzyHighlight = hasQuery ? (absIdx === 0 ? "top" : "match") : undefined;
+				lines.push(this.renderRow(model, isSelected, isCurrent, width, theme, colW, fuzzyHighlight));
 			}
 		}
 		// The empty-state message occupies one row; keep the count slot too.
 		for (let i = Math.max(1, visible.length); i < MAX_VISIBLE; i++) lines.push("");
 		const position = rows.length ? this.rowIndex + 1 : 0;
 		const selected = rows[this.rowIndex];
-		const details = `  (${position}/${rows.length})${selected ? ` ${selected.id}` : ""}`;
-		lines.push(...wrapTextWithAnsi(theme.fg("dim", details), width));
+		// On cross-provider tabs the bare id is ambiguous when several
+		// providers offer the same model, so show the full ref.
+		const ref = selected ? (this.crossProvider ? `${selected.provider}/${selected.id}` : selected.id) : "";
+		const details = `  (${position}/${rows.length})${ref ? ` ${ref}` : ""}`;
+		// One line, always: truncate rather than wrap so the height never changes.
+		lines.push(theme.fg("dim", truncateToWidth(details, width)));
 
 		// ── help bar ─────────────────────────────────────────────────────
 		lines.push(theme.fg("border", "─".repeat(width)));
-		const help = `↑↓ / Enter select · Tab provider · Ctrl+F ${this.fuzzy ? "search" : "fuzzy"} · Esc/Ctrl+C cancel`;
+		const help = [
+			"↑↓ Enter select model",
+			"←→ Tab select menu",
+			"Ctrl+F toggle favorite",
+			"Ctrl+X clear favorites",
+			"Esc cancel",
+		].join(" · ");
 		lines.push(theme.fg("dim", truncateToWidth("  " + help, width)));
 		lines.push(theme.fg("accent", "─".repeat(width)));
 
@@ -417,47 +588,70 @@ class ModelPickerComponent {
 	}
 
 	private renderTabs(width: number, theme: any): string {
-		const total = this.categories.length;
-		if (!total) return "";
-		const selectedProvider = this.fuzzy ? this.filteredRows[this.rowIndex]?.provider : this.categories[this.catIndex];
-		const active = Math.max(0, this.categories.indexOf(selectedProvider ?? this.categories[this.catIndex]!));
-		const ARROW_W = 4; // "◀ " + " ▶"
-		const SEP_W = 1;   // "│"
-		const availForTabs = width - ARROW_W;
-
-		let lo = active;
-		let hi = active;
-		let used = visibleWidth(` ${providerLabel(this.categories[active]!)} `);
-
-		while (true) {
-			let expanded = false;
-			if (hi + 1 < total) {
-				const w = SEP_W + visibleWidth(` ${providerLabel(this.categories[hi + 1]!)} `);
-				if (used + w <= availForTabs) { hi++; used += w; expanded = true; }
-			}
-			if (lo - 1 >= 0) {
-				const w = SEP_W + visibleWidth(` ${providerLabel(this.categories[lo - 1]!)} `);
-				if (used + w <= availForTabs) { lo--; used += w; expanded = true; }
-			}
-			if (!expanded) break;
-		}
-
-		const segments: string[] = [];
-		for (let i = lo; i <= hi; i++) {
-			const label = ` ${providerLabel(this.categories[i]!)} `;
-			const selected = this.categories[i] === selectedProvider;
-			const color = selected ? "accent" : this.fuzzy
-				? this.matchingProviders.has(this.categories[i]!) ? "success" : "dim"
+		const activeKey = this.currentTab();
+		const hasQuery = this.searchInput.getValue().trim() !== "";
+		const anyFavoriteMatch = this.globalMatches.some((m) => this.isFavorite(m));
+		const SEP = theme.fg("dim", "│");
+		const SEP_W = 1;
+		const labelOf = (key: string) => ` ${this.tabLabel(key)} `;
+		const segment = (key: string): string => {
+			const label = labelOf(key);
+			const selected = key === activeKey;
+			const matches = key === FAVORITES_TAB ? anyFavoriteMatch
+				: key === ALL_TAB ? this.globalMatches.length > 0
+				: this.matchingProviders.has(key);
+			const color = selected ? "accent" : hasQuery
+				? matches ? "success" : "dim"
 				: "muted";
 			const styled = theme.fg(color, selected ? theme.bold(label) : label);
-			segments.push(selected ? theme.bg("selectedBg", styled) : styled);
+			if (selected) return theme.bg("selectedBg", styled);
+			// During search, tabs with matches get a subtle violet panel behind
+			// their green text, rather than a green-tinted neutral panel that
+			// blends with the label. selectedBg stays reserved for selection.
+			return hasQuery && matches ? theme.bg("customMessageBg", styled) : styled;
+		};
+
+		// Favorites and All are pinned: always visible. Only the provider
+		// segment windows, scrolling just enough to keep the active tab in
+		// view, with << / >> marking what is hidden on each side.
+		const pinned = [FAVORITES_TAB, ALL_TAB];
+		const pinnedPart = pinned.map(segment).join(SEP);
+		const pinnedW = pinned.reduce((sum, key) => sum + visibleWidth(labelOf(key)), 0) + SEP_W;
+		const providers = this.categories;
+		if (!providers.length) return truncateToWidth("  " + pinnedPart, width);
+
+		const segW = providers.map((key) => visibleWidth(labelOf(key)));
+		const rangeW = (lo: number, hi: number) =>
+			segW.slice(lo, hi + 1).reduce((sum, w) => sum + w, 0) + Math.max(0, hi - lo) * SEP_W;
+		const activeIdx = providers.indexOf(activeKey);
+		let lo = 0;
+		let hi = -1;
+		// Two passes: arrow widths depend on the hidden counts the window
+		// produces, so recompute the budget once with real counts.
+		for (let pass = 0; pass < 2; pass++) {
+			const leftHidden = lo;
+			const rightHidden = providers.length - 1 - hi;
+			const reserve = (pass === 0 ? 3 : leftHidden > 0 ? visibleWidth("<< ") : 0)
+				+ (pass === 0 ? 3 : rightHidden > 0 ? visibleWidth(" >>") : 0);
+			const avail = Math.max(0, width - 2 - pinnedW - SEP_W - reserve);
+			lo = Math.min(Math.max(0, this.providerLo), providers.length - 1);
+			if (activeIdx >= 0) {
+				if (activeIdx < lo) lo = activeIdx;
+				while (lo < activeIdx && rangeW(lo, activeIdx) > avail) lo++;
+			}
+			hi = lo - 1;
+			while (hi + 1 < providers.length && rangeW(lo, hi + 1) <= avail) hi++;
+			if (hi < lo) hi = lo; // a single over-wide label still shows, truncated at the end
+			while (lo > 0 && rangeW(lo - 1, hi) <= avail) lo--;
 		}
+		this.providerLo = lo;
 
-		const tabPart = segments.join(theme.fg("dim", "│"));
-		const leftPart = lo > 0 ? theme.fg("dim", "◀ ") : "  ";
-		const rightPart = hi < total - 1 ? theme.fg("dim", " ▶") : "  ";
-
-		return truncateToWidth(leftPart + tabPart + rightPart, width);
+		const leftHidden = lo;
+		const rightHidden = providers.length - 1 - hi;
+		const leftPart = leftHidden > 0 ? theme.fg("dim", "<< ") : "";
+		const rightPart = rightHidden > 0 ? theme.fg("dim", " >>") : "";
+		const providerPart = providers.slice(lo, hi + 1).map(segment).join(SEP);
+		return truncateToWidth("  " + pinnedPart + SEP + leftPart + providerPart + rightPart, width);
 	}
 
 	private renderRow(
@@ -467,6 +661,7 @@ class ModelPickerComponent {
 		width: number,
 		theme: any,
 		colW: { name: number; provider: number; cost: number; ctx: number; thinking: number; vision: number },
+		fuzzyHighlight?: "match" | "top",
 	): string {
 		const prefix = isSelected ? "▶ " : "  ";
 		const ctxStr = model.contextWindow ? fmtCtx(model.contextWindow) : "";
@@ -479,38 +674,46 @@ class ModelPickerComponent {
 			colW.vision ? (model.input.includes("image") ? "vision" : "").padEnd(colW.vision) : "",
 		].filter(Boolean).join("  ");
 
-		const curMark = isCurrent ? " ●" : "";
-		const nameAvail = Math.max(0, width - visibleWidth(prefix) - visibleWidth(right) - (this.fuzzy ? 2 : visibleWidth(curMark)) - 2);
-		const providerWidth = this.fuzzy ? Math.min(colW.provider, Math.max(0, nameAvail - 12)) : 0;
-		const nameWidth = this.fuzzy ? Math.min(colW.name, Math.max(0, nameAvail - providerWidth - 2)) : nameAvail;
+		const showProvider = this.crossProvider;
+		const isFav = this.isFavorite(model);
+		// One status dot per row, coloured by meaning:
+		//   current model            → green (success)
+		//   favorite                 → gold (warning); hidden on the Favorites
+		//                              tab, where every row is a favorite
+		//   current model + favorite → gold, shown on every tab
+		const dotColor = isCurrent ? (isFav ? "warning" : "success")
+			: isFav && !this.onFavoritesTab() ? "warning"
+			: undefined;
+		const dot = dotColor ? " ●" : "";
+		const nameAvail = Math.max(0, width - visibleWidth(prefix) - visibleWidth(right) - (showProvider ? 2 : visibleWidth(dot)) - 2);
+		const providerWidth = showProvider ? Math.min(colW.provider, Math.max(0, nameAvail - 12)) : 0;
+		const nameWidth = showProvider ? Math.min(colW.name, Math.max(0, nameAvail - providerWidth - 2)) : nameAvail;
 		const name = truncateToWidth(modelLabel(model), nameWidth);
-		const provider = this.fuzzy && providerWidth >= 2 ? `[${truncateToWidth(providerLabel(model.provider), providerWidth - 2)}]` : "";
-		const nameTrunc = this.fuzzy
-			? name + curMark + " ".repeat(Math.max(0, nameWidth + 2 - visibleWidth(name + curMark))) + "  " + provider
-			: name + curMark;
+		const provider = showProvider && providerWidth >= 2 ? `[${truncateToWidth(providerLabel(model.provider), providerWidth - 2)}]` : "";
+		const tail = showProvider
+			? " ".repeat(Math.max(0, nameWidth + 2 - visibleWidth(name + dot))) + "  " + provider
+			: "";
 		const gap = " ".repeat(
-			Math.max(0, width - visibleWidth(prefix + nameTrunc) - visibleWidth(right)),
+			Math.max(0, width - visibleWidth(prefix + name + dot + tail) - visibleWidth(right)),
 		);
 
-		if (isSelected) {
-			return (
-				theme.fg("accent", prefix + nameTrunc) +
-				gap +
-				theme.fg("accent", theme.bold(right))
-			);
-		} else if (isCurrent) {
-			return (
-				theme.fg("success", prefix + nameTrunc) +
-				gap +
-				theme.fg("muted", right)
-			);
-		} else {
-			return (
-				theme.fg("text", prefix + nameTrunc) +
-				gap +
-				theme.fg("dim", right)
-			);
-		}
+		// Row colour: selected → accent, current → green, otherwise default.
+		// Favorite state is carried by the dot alone. The dot keeps its own
+		// colour on every row, including the selected one, so it is coloured
+		// separately from the text around it.
+		const rowColor = isSelected ? "accent" : isCurrent ? "success" : "text";
+		const rightColor = isSelected ? "accent" : isCurrent ? "muted" : "dim";
+		const left = theme.fg(rowColor, prefix + name)
+			+ (dotColor ? theme.fg(dotColor, theme.bold(dot)) : "")
+			+ (tail ? theme.fg(rowColor, tail) : "");
+		const line = left + gap + theme.fg(rightColor, isSelected ? theme.bold(right) : right);
+		// Fuzzy matches sit on a subtle neutral panel. The best-ranked row uses
+		// the theme's dedicated search-match background instead. Both deliberately
+		// differ from selectedBg, which remains the selected tab's highlight.
+		const fuzzyBg = fuzzyHighlight === "top" ? "searchMatchBg"
+			: fuzzyHighlight === "match" ? "toolPendingBg"
+			: undefined;
+		return fuzzyBg ? theme.bg(fuzzyBg, line) : line;
 	}
 
 	invalidate(): void {
@@ -537,6 +740,43 @@ export default function modelPickerExtension(pi: ExtensionAPI) {
 			return;
 		}
 
+		// Favorites are this extension's own list in settings.json, unrelated
+		// to pi's native scoped models. Refs for models missing from the
+		// catalogue are kept, so a favorite survives its provider being
+		// temporarily unavailable.
+		let favoriteRefs = readFavoriteRefs();
+		const persistFavorites = () => {
+			try {
+				writeSetting("favorites", favoriteRefs);
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				ctx.ui.notify(`Could not save favorites: ${message}`, "error");
+			}
+		};
+		const resolveFavorites = (models: Model<Api>[]): Model<Api>[] =>
+			favoriteRefs.flatMap((ref) => {
+				const match = models.find(
+					(m) => `${m.provider}/${m.id}`.toLowerCase() === ref.toLowerCase(),
+				);
+				return match ? [match] : [];
+			});
+		const addToFavorite = (model: Model<Api>) => {
+			const ref = `${model.provider}/${model.id}`;
+			if (favoriteRefs.some((r) => r.toLowerCase() === ref.toLowerCase())) return;
+			favoriteRefs = [...favoriteRefs, ref];
+			persistFavorites();
+		};
+		const removeFavorite = (model: Model<Api>) => {
+			const ref = `${model.provider}/${model.id}`.toLowerCase();
+			favoriteRefs = favoriteRefs.filter((r) => r.toLowerCase() !== ref);
+			persistFavorites();
+		};
+		const removeFavorites = (models: Model<Api>[]) => {
+			const refs = new Set(models.map((m) => `${m.provider}/${m.id}`.toLowerCase()));
+			favoriteRefs = favoriteRefs.filter((r) => !refs.has(r.toLowerCase()));
+			persistFavorites();
+		};
+
 		const selected = await ctx.ui.custom<Model<Api> | null>((tui, theme, _kb, done) => {
 			let closed = false;
 			const close = (model: Model<Api> | null) => {
@@ -546,10 +786,18 @@ export default function modelPickerExtension(pi: ExtensionAPI) {
 			};
 			const picker = new ModelPickerComponent({
 				allModels,
+				favorites: resolveFavorites(allModels),
 				currentModel: ctx.model ?? undefined,
 				lastTab,
 				onSelect: close,
 				onCancel: () => close(null),
+				onAddToFavorite: addToFavorite,
+				onRemoveFavorite: removeFavorite,
+				onRemoveFavorites: removeFavorites,
+				onClearFavorites: () => {
+					favoriteRefs = [];
+					persistFavorites();
+				},
 			});
 
 			// Give the picker focus so the embedded Input gets IME cursor
@@ -641,3 +889,12 @@ export default function modelPickerExtension(pi: ExtensionAPI) {
 		});
 	}
 }
+
+
+
+
+
+
+
+
+
