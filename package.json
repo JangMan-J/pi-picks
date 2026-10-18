@@ -1,10 +1,10 @@
 {
   "name": "pi-picks",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "description": "Keyboard-driven model picker for the pi coding agent: favorites, provider tabs, and one fuzzy query",
   "type": "module",
   "bin": {
-    "pi-picks": "./scripts/install.js"
+    "pi-picks": "scripts/install.js"
   },
   "files": [
     "index.ts",
@@ -20,9 +20,9 @@
     ]
   },
   "peerDependencies": {
+    "@mariozechner/pi-ai": "*",
     "@mariozechner/pi-coding-agent": "*",
-    "@mariozechner/pi-tui": "*",
-    "@mariozechner/pi-ai": "*"
+    "@mariozechner/pi-tui": "*"
   },
   "scripts": {
     "check": "node scripts/check.mjs"

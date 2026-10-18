@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.1 — 2026-10-17
+
+- Restore the `pi-picks` bin (`npx pi-picks`), which npm dropped from 1.3.0 because of its `./` prefix
+- Fail `npm run check` when npm would auto-correct package.json at publish time
+- First release published from CI with trusted publishing and provenance
+
 ## 1.3.0 — 2026-10-17
 
 - Rename the package to `pi-picks` (npm and GitHub). Settings move to the `"pi-picks"` block in settings.json; an existing `"pi-model-picker"` block is still read and is migrated on the next write

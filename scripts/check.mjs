@@ -3,7 +3,7 @@
 // the version, the tarball holds exactly package.json "files", and the
 // installer copies every packed file.
 
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -39,11 +39,21 @@ check(`CHANGELOG.md has a "## ${pkg.version}" section`, () => {
 });
 
 check("npm pack ships exactly package.json files", () => {
-	const [info] = JSON.parse(run("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"]));
+	const pack = spawnSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], { cwd: root, encoding: "utf8" });
+	if (pack.status !== 0) throw new Error(pack.stderr);
+	const [info] = JSON.parse(pack.stdout);
 	const packed = info.files.map((f) => f.path).sort();
 	const missing = shipped.filter((f) => !packed.includes(f));
 	const extra = packed.filter((f) => !shipped.includes(f));
 	if (missing.length || extra.length) throw new Error(`missing: [${missing}] extra: [${extra}]`);
+});
+
+check("npm publish would not auto-correct package.json", () => {
+	// npm silently drops invalid fields (e.g. a "./"-prefixed bin) at publish time;
+	// only publish, not pack, reports it.
+	const dry = spawnSync("npm", ["publish", "--dry-run", "--ignore-scripts", "--loglevel=warn"], { cwd: root, encoding: "utf8" });
+	if (!/auto-corrected/.test(dry.stderr)) return;
+	throw new Error(dry.stderr.split("\n").filter((l) => /corrected|invalid/.test(l)).join("\n"));
 });
 
 check("installer copies every shipped file", () => {
