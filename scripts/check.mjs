@@ -47,7 +47,7 @@ check("npm pack ships exactly package.json files", () => {
 	if (pack.status !== 0) throw new Error(pack.stderr);
 	const result = JSON.parse(pack.stdout);
 	// npm 11 returns an array; npm 12 keys the result by package name.
-	const info = Array.isArray(result) ? result[0] : result[pkg.name];
+	const info = Array.isArray(result) ? result[0] : result[pkg.name] ?? Object.values(result)[0];
 	const packed = info.files.map((f) => f.path).sort();
 	const missing = shipped.filter((f) => !packed.includes(f));
 	const extra = packed.filter((f) => !shipped.includes(f));
@@ -66,7 +66,7 @@ check("installer copies every shipped file", () => {
 	const agentDir = mkdtempSync(join(tmpdir(), "pi-picks-check-"));
 	try {
 		run(process.execPath, ["scripts/install.js"], { ...process.env, PI_CODING_AGENT_DIR: agentDir });
-		const missing = shipped.filter((f) => !existsSync(join(agentDir, "extensions", pkg.name, f)));
+		const missing = shipped.filter((f) => !existsSync(join(agentDir, "extensions", pkg.name.split("/").pop(), f)));
 		if (missing.length) throw new Error(`not installed: [${missing}]`);
 	} finally {
 		rmSync(agentDir, { recursive: true, force: true });

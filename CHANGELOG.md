@@ -1,7 +1,9 @@
 # Changelog
 
-## Unreleased
+## 1.4.0 — 2026-10-28
 
+- Publish under the scoped name `@jangmanj/pi-picks` (the unscoped `pi-picks` stops at 1.3.1). Remove the old package before installing, so `/models` is not registered twice
+- Release from a version tag through npm trusted publishing with provenance (`npm version` then `git push --follow-tags`)
 - Import pi from the `@earendil-works/*` packages (peer dependencies updated from `@mariozechner/*`)
 - Move favorites into one module (`favorites.ts`) with tests. Stored refs are authoritative and compare case-insensitively; duplicates collapse to the first entry
 - Never overwrite a `settings.json` that is not valid JSON: a failed favorites save is rolled back and reported instead of replacing the file

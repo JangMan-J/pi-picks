@@ -1,6 +1,6 @@
 # pi-picks
 
-[![npm](https://img.shields.io/npm/v/pi-picks)](https://www.npmjs.com/package/pi-picks)
+[![npm](https://img.shields.io/npm/v/@jangmanj/pi-picks)](https://www.npmjs.com/package/@jangmanj/pi-picks)
 
 A keyboard-driven model picker extension for the [pi coding agent](https://github.com/badlogic/pi-mono). It started as a fork of rilham97's original model picker and was renamed to `pi-picks` once it diverged: favorites, one fuzzy query across tabs, token costs, and aligned metadata.
 
@@ -40,10 +40,14 @@ The first tab, **Favorites**, is the picker's own list, independent of pi's nati
 ### Via pi package manager (recommended)
 
 ```bash
-pi install npm:pi-picks
+pi install npm:@jangmanj/pi-picks
 ```
 
 Restart pi after installation. `pi update --extensions` pulls new releases.
+
+### Migrating from the unscoped `pi-picks`
+
+Versions up to 1.3.1 were published as `pi-picks`. Remove that package first so `/models` is not registered twice: `pi remove npm:pi-picks`. Your settings carry over unchanged.
 
 ### From git
 
@@ -118,12 +122,17 @@ The picker calls `modelRegistry.refresh()` then `modelRegistry.getAvailable()` �
 ## Uninstall
 
 ```bash
-pi remove npm:pi-picks
+pi remove npm:@jangmanj/pi-picks
 ```
 
 ## Releasing
 
-Every push to `main` runs `npm run check`. When `package.json` has a version that is not on npm yet, CI publishes it with npm trusted publishing (OIDC, with provenance), then tags `v<version>` and creates a GitHub release from that version's `CHANGELOG.md` section. To release: bump `version`, rename the `## Unreleased` heading to `## <version> — <date>`, and push.
+Every push to `main` and every pull request runs `npm run check`. A release is a version tag:
+
+1. Add a `## <version> — <date>` section to `CHANGELOG.md` and commit it.
+2. Run `npm version <patch|minor|major>` (it bumps `package.json`, commits, and tags `v<version>`), then `git push --follow-tags`.
+
+The tag runs `.github/workflows/publish.yml`. It reruns the check, refuses a tag that does not match `package.json`, publishes with npm trusted publishing (OIDC, with provenance), and creates the GitHub release. A tag whose version is already on npm skips the publish, so rerunning a release is safe. The one-time npm setup for a new package name is `npm run bootstrap:npm` (see the header of `scripts/npm-bootstrap.sh`).
 
 ## License
 

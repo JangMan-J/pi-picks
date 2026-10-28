@@ -1,6 +1,6 @@
 {
-  "name": "pi-picks",
-  "version": "1.3.1",
+  "name": "@jangmanj/pi-picks",
+  "version": "1.4.0",
   "description": "Keyboard-driven model picker for the pi coding agent: favorites, provider tabs, and one fuzzy query",
   "type": "module",
   "bin": {
@@ -26,7 +26,8 @@
     "@earendil-works/pi-tui": "*"
   },
   "scripts": {
-    "check": "node scripts/check.mjs"
+    "check": "node scripts/check.mjs",
+    "bootstrap:npm": "bash scripts/npm-bootstrap.sh"
   },
   "keywords": [
     "pi-package",
