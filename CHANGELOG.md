@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Import pi from the `@earendil-works/*` packages (peer dependencies updated from `@mariozechner/*`)
+- Move favorites into one module (`favorites.ts`) with tests. Stored refs are authoritative and compare case-insensitively; duplicates collapse to the first entry
+- Never overwrite a `settings.json` that is not valid JSON: a failed favorites save is rolled back and reported instead of replacing the file
+- Ctrl+X on a provider tab now also clears that provider's favorites whose models are unavailable; on All it clears every stored favorite
+
 ## 1.3.1 — 2026-10-17
 
 - Restore the `pi-picks` bin (`npx pi-picks`), which npm dropped from 1.3.0 because of its `./` prefix
@@ -8,7 +15,7 @@
 
 ## 1.3.0 — 2026-10-17
 
-- Rename the package to `pi-picks` (npm and GitHub). Settings move to the `"pi-picks"` block in settings.json; an existing `"pi-model-picker"` block is still read and is migrated on the next write
+- Rename the package to `pi-picks` (npm and GitHub). Settings are stored in the `"pi-picks"` block in settings.json
 - Publish to npm from GitHub Actions with trusted publishing on every version bump pushed to main
 - Change the default picker shortcut from Ctrl+Shift+M to Ctrl+\ (unbound in pi; configurable via pi-picks.shortcut)
 
@@ -42,7 +49,7 @@
 
 ## 1.1.0 — 2026-07-02
 
-- Keyboard shortcut is now configurable via `~/.pi/agent/settings.json` (`pi-model-picker.shortcut`)
+- Keyboard shortcut is now configurable via `~/.pi/agent/settings.json` (`pi-picks.shortcut`)
   - Accepts a string, an array of strings (binds multiple keys), or `false` to disable
   - Defaults to `Ctrl+Shift+M` when unset
 

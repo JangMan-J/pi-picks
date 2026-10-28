@@ -25,36 +25,32 @@
  *     { "pi-picks": { "shortcut": "alt+m" } }
  *   Accepts a string, an array of strings (binds multiple keys), or `false`
  *   to disable the shortcut entirely (the /models command still works).
- *   A legacy "pi-model-picker" block is still read and is migrated on the
- *   next settings write.
  */
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { getAgentDir, SettingsManager } from "@mariozechner/pi-coding-agent";
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { Input, Key, fuzzyFilter, matchesKey, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
-import type { KeyId } from "@mariozechner/pi-tui";
-import type { Api, Model } from "@mariozechner/pi-ai";
+import { getAgentDir, SettingsManager } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { Input, Key, fuzzyFilter, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import type { KeyId } from "@earendil-works/pi-tui";
+import type { Api, Model } from "@earendil-works/pi-ai";
+import { Favorites } from "./favorites.ts";
 
 // ─── settings ───────────────────────────────────────────────────────────────
 
 const DEFAULT_SHORTCUT = "ctrl+\\";
 
 const SETTINGS_KEY = "pi-picks";
-/** Settings block name used before the rename; read as a fallback, removed on write. */
-const LEGACY_SETTINGS_KEY = "pi-model-picker";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
-/** The extension's settings, with the current block overriding the legacy one. */
+/** The extension's settings block. */
 function settingsBlock(raw: unknown): Record<string, unknown> {
 	if (!isRecord(raw)) return {};
-	const legacy = raw[LEGACY_SETTINGS_KEY];
 	const current = raw[SETTINGS_KEY];
-	return { ...(isRecord(legacy) ? legacy : {}), ...(isRecord(current) ? current : {}) };
+	return isRecord(current) ? { ...current } : {};
 }
 
 function readSetting(setting: string): unknown {
@@ -63,29 +59,6 @@ function readSetting(setting: string): unknown {
 	} catch {
 		return undefined; // Missing or malformed settings use defaults.
 	}
-}
-
-/** Stored favorites as `provider/id` refs, in the order they were added. */
-function readFavoriteRefs(): string[] {
-	const favorites = readSetting("favorites");
-	return Array.isArray(favorites)
-		? favorites.filter((f): f is string => typeof f === "string" && f.length > 0)
-		: [];
-}
-
-/** Write one pi-picks setting, preserving everything else in settings.json. */
-function writeSetting(setting: string, value: unknown): void {
-	const path = join(getAgentDir(), "settings.json");
-	let raw: Record<string, unknown> = {};
-	try {
-		const parsed = JSON.parse(readFileSync(path, "utf-8"));
-		if (isRecord(parsed)) raw = parsed;
-	} catch {
-		// Missing or malformed settings start from an empty object.
-	}
-	raw[SETTINGS_KEY] = { ...settingsBlock(raw), [setting]: value };
-	delete raw[LEGACY_SETTINGS_KEY];
-	writeFileSync(path, JSON.stringify(raw, null, 2) + "\n", "utf-8");
 }
 
 /** Accept a key, multiple keys, or false/[] to disable. */
@@ -153,16 +126,13 @@ const modelRef = (m: Model<Api>): string => `${m.provider}\0${m.id}`;
 
 interface ModelPickerOptions {
 	allModels: Model<Api>[];
-	/** Stored favorites resolved against the catalogue, in stored order. */
-	favorites: Model<Api>[];
+	favorites: Favorites;
+	/** Called with the reason when a favorites change could not be saved. */
+	onFavoritesError: (message: string) => void;
 	currentModel: Model<Api> | undefined;
 	lastTab?: string;
 	onSelect: (model: Model<Api>) => void;
 	onCancel: () => void;
-	onAddToFavorite: (model: Model<Api>) => void;
-	onRemoveFavorite: (model: Model<Api>) => void;
-	onRemoveFavorites: (models: Model<Api>[]) => void;
-	onClearFavorites: () => void;
 }
 
 class ModelPickerComponent {
@@ -174,8 +144,8 @@ class ModelPickerComponent {
 	private rowIndex = 0;
 	private matchingProviders = new Set<string>();
 
-	// Favorite models in stored order; mutated locally by Ctrl+F/Ctrl+X
-	private favorites: Model<Api>[];
+	// Stored favorites present in the catalogue, in stored order (a view of opts.favorites)
+	private resolvedFavorites: Model<Api>[] = [];
 
 	// Fuzzy matches across every provider for the current query (drives tab
 	// highlighting, match-only Tab stops, and widen hints)
@@ -202,12 +172,12 @@ class ModelPickerComponent {
 	constructor(private opts: ModelPickerOptions) {
 		this.byCategory = this.buildCategories();
 		this.categories = Array.from(this.byCategory.keys());
-		this.favorites = [...opts.favorites];
+		this.refreshFavorites();
 
 		// Home is Favorites when any favorite is available; otherwise restore
 		// the saved tab if available, otherwise follow the current model.
 		const cur = opts.currentModel;
-		const startTab = this.favorites.length > 0 ? FAVORITES_TAB
+		const startTab = this.resolvedFavorites.length > 0 ? FAVORITES_TAB
 			: opts.lastTab && this.tabs.includes(opts.lastTab) ? opts.lastTab
 			: cur?.provider ?? ALL_TAB;
 		this.catIndex = Math.max(0, this.tabs.indexOf(startTab));
@@ -251,7 +221,11 @@ class ModelPickerComponent {
 	}
 
 	private isFavorite(model: Model<Api>): boolean {
-		return this.favorites.some((m) => modelRef(m) === modelRef(model));
+		return this.opts.favorites.has(model);
+	}
+
+	private refreshFavorites(): void {
+		this.resolvedFavorites = this.opts.favorites.resolve(this.opts.allModels);
 	}
 
 	getLastTab() {
@@ -265,12 +239,7 @@ class ModelPickerComponent {
 		if (currentModel !== undefined) this.opts.currentModel = currentModel;
 		this.byCategory = this.buildCategories();
 		this.categories = Array.from(this.byCategory.keys());
-		// Remap favorites onto refreshed objects, dropping unavailable ones.
-		const refreshed = new Map(allModels.map((m) => [modelRef(m), m]));
-		this.favorites = this.favorites.flatMap((m) => {
-			const next = refreshed.get(modelRef(m));
-			return next ? [next] : [];
-		});
+		this.refreshFavorites();
 		const nextTabIdx = this.tabs.indexOf(prevTab);
 		this.catIndex = nextTabIdx >= 0 ? nextTabIdx : Math.min(this.catIndex, Math.max(0, this.tabs.length - 1));
 		this.applyFilter();
@@ -333,7 +302,7 @@ class ModelPickerComponent {
 
 	/** Source rows for a tab before the query is applied. */
 	private tabSource(tabKey: string): Model<Api>[] {
-		return tabKey === FAVORITES_TAB ? this.favorites
+		return tabKey === FAVORITES_TAB ? this.resolvedFavorites
 			: tabKey === ALL_TAB ? this.allSorted
 			: this.byCategory.get(tabKey) ?? [];
 	}
@@ -389,38 +358,26 @@ class ModelPickerComponent {
 		if (!selected) return;
 		// No status line: the row's colour and dot are the feedback, so the
 		// picker keeps a fixed height.
-		if (this.isFavorite(selected)) {
-			this.favorites = this.favorites.filter((m) => modelRef(m) !== modelRef(selected));
-			this.opts.onRemoveFavorite(selected);
-		} else {
-			this.favorites.push(selected);
-			this.opts.onAddToFavorite(selected);
-		}
+		const result = this.isFavorite(selected)
+			? this.opts.favorites.remove(selected)
+			: this.opts.favorites.add(selected);
+		if (!result.ok) this.opts.onFavoritesError(result.error);
+		this.refreshFavorites();
 		this.applyFilter();
 	}
 
 	/**
-	 * Ctrl+X: remove favorites contained in the active tab. Scope is the
-	 * tab's unfiltered source list, not just the rows matched by the query:
-	 * provider tabs lose only that provider's favorites and All loses every
-	 * resolved favorite. The Favorites tab retains its full clear, including
-	 * stored refs whose models are temporarily unavailable.
+	 * Ctrl+X: remove the favorites contained in the active tab, whatever the
+	 * query. Favorites and All clear every stored favorite; a provider tab
+	 * clears that provider's. Stored refs whose models are temporarily
+	 * unavailable are cleared too.
 	 */
 	private clearFavoritesInTab(): void {
-		if (!this.favorites.length) return;
-		if (this.onFavoritesTab()) {
-			this.favorites = [];
-			this.opts.onClearFavorites();
-			this.rowIndex = 0;
-			this.applyFilter();
-			return;
-		}
-		const contained = new Set(this.tabSource(this.currentTab()).map(modelRef));
-		const removed = this.favorites.filter((m) => contained.has(modelRef(m)));
-		if (!removed.length) return;
-		const removedRefs = new Set(removed.map(modelRef));
-		this.favorites = this.favorites.filter((m) => !removedRefs.has(modelRef(m)));
-		this.opts.onRemoveFavorites(removed);
+		const tab = this.currentTab();
+		const result = this.opts.favorites.clear(tab === FAVORITES_TAB || tab === ALL_TAB ? undefined : tab);
+		if (!result.ok) this.opts.onFavoritesError(result.error);
+		this.refreshFavorites();
+		if (tab === FAVORITES_TAB) this.rowIndex = 0;
 		this.applyFilter();
 	}
 
@@ -755,41 +712,8 @@ export default function modelPickerExtension(pi: ExtensionAPI) {
 		}
 
 		// Favorites are this extension's own list in settings.json, unrelated
-		// to pi's native scoped models. Refs for models missing from the
-		// catalogue are kept, so a favorite survives its provider being
-		// temporarily unavailable.
-		let favoriteRefs = readFavoriteRefs();
-		const persistFavorites = () => {
-			try {
-				writeSetting("favorites", favoriteRefs);
-			} catch (error) {
-				const message = error instanceof Error ? error.message : String(error);
-				ctx.ui.notify(`Could not save favorites: ${message}`, "error");
-			}
-		};
-		const resolveFavorites = (models: Model<Api>[]): Model<Api>[] =>
-			favoriteRefs.flatMap((ref) => {
-				const match = models.find(
-					(m) => `${m.provider}/${m.id}`.toLowerCase() === ref.toLowerCase(),
-				);
-				return match ? [match] : [];
-			});
-		const addToFavorite = (model: Model<Api>) => {
-			const ref = `${model.provider}/${model.id}`;
-			if (favoriteRefs.some((r) => r.toLowerCase() === ref.toLowerCase())) return;
-			favoriteRefs = [...favoriteRefs, ref];
-			persistFavorites();
-		};
-		const removeFavorite = (model: Model<Api>) => {
-			const ref = `${model.provider}/${model.id}`.toLowerCase();
-			favoriteRefs = favoriteRefs.filter((r) => r.toLowerCase() !== ref);
-			persistFavorites();
-		};
-		const removeFavorites = (models: Model<Api>[]) => {
-			const refs = new Set(models.map((m) => `${m.provider}/${m.id}`.toLowerCase()));
-			favoriteRefs = favoriteRefs.filter((r) => !refs.has(r.toLowerCase()));
-			persistFavorites();
-		};
+		// to pi's native scoped models; read fresh each time the picker opens.
+		const favorites = Favorites.open(join(getAgentDir(), "settings.json"));
 
 		const selected = await ctx.ui.custom<Model<Api> | null>((tui, theme, _kb, done) => {
 			let closed = false;
@@ -800,18 +724,12 @@ export default function modelPickerExtension(pi: ExtensionAPI) {
 			};
 			const picker = new ModelPickerComponent({
 				allModels,
-				favorites: resolveFavorites(allModels),
+				favorites,
+				onFavoritesError: (message) => ctx.ui.notify(message, "error"),
 				currentModel: ctx.model ?? undefined,
 				lastTab,
 				onSelect: close,
 				onCancel: () => close(null),
-				onAddToFavorite: addToFavorite,
-				onRemoveFavorite: removeFavorite,
-				onRemoveFavorites: removeFavorites,
-				onClearFavorites: () => {
-					favoriteRefs = [];
-					persistFavorites();
-				},
 			});
 
 			// Give the picker focus so the embedded Input gets IME cursor

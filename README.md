@@ -2,11 +2,11 @@
 
 [![npm](https://img.shields.io/npm/v/pi-picks)](https://www.npmjs.com/package/pi-picks)
 
-A keyboard-driven model picker extension for the [pi coding agent](https://github.com/badlogic/pi-mono). It started as a fork of [rilham97/pi-model-picker](https://github.com/rilham97/pi-model-picker) and was renamed once it diverged: favorites, one fuzzy query across tabs, token costs, and aligned metadata.
+A keyboard-driven model picker extension for the [pi coding agent](https://github.com/badlogic/pi-mono). It started as a fork of rilham97's original model picker and was renamed to `pi-picks` once it diverged: favorites, one fuzzy query across tabs, token costs, and aligned metadata.
 
 One screen, with tabs as filters over a single list: **Favorites**, **All**, then one tab per provider (A→Z). Typing fuzzy-searches within the current tab. Press `Tab` or `Shift+Tab` to switch tabs without losing your query; the All tab sits beside Favorites when you need to widen. The picker opens on Favorites when any favorite is available, so the usual flow is just open, type a character or two, `Enter`.
 
-The first tab, **Favorites**, is the picker's own list, independent of pi's native scoped models, and the screen the picker opens on. Press `Ctrl+F` on any tab to toggle the selected model in Favorites (it stays in its provider tab too), and `Ctrl+X` to remove the favorites contained in the active tab: every favorite on Favorites or All, or only that provider's favorites on a provider tab. Favorites are marked with a gold `●` outside the Favorites tab. They are stored as `provider/id` strings in `~/.pi/agent/settings.json` under `pi-picks.favorites` (hand-editable), in the order added; a favorite whose model is temporarily unavailable is kept and reappears when the model does.
+The first tab, **Favorites**, is the picker's own list, independent of pi's native scoped models, and the screen the picker opens on. Press `Ctrl+F` on any tab to toggle the selected model in Favorites (it stays in its provider tab too), and `Ctrl+X` to remove the favorites contained in the active tab: every favorite on Favorites or All, or only that provider's favorites on a provider tab. Favorites are marked with a gold `●` outside the Favorites tab. They are stored as `provider/id` strings in `~/.pi/agent/settings.json` under `pi-picks.favorites` (hand-editable), in the order added; a favorite whose model is temporarily unavailable is kept and reappears when the model does. A `settings.json` that is not valid JSON is never overwritten: the picker undoes the change and reports that favorites could not be saved.
 
 ## Preview
 
@@ -50,10 +50,6 @@ Restart pi after installation. `pi update --extensions` pulls new releases.
 ```bash
 pi install git:github.com/JangMan-J/pi-picks
 ```
-
-### Migrating from pi-model-picker
-
-Remove the old package first so `/models` is not registered twice (`pi remove npm:pi-model-picker` or `pi remove git:github.com/JangMan-J/pi-model-picker`, and delete `~/.pi/agent/extensions/model-picker` if you installed it by hand). Settings under the old `"pi-model-picker"` key in `settings.json` are still read, and move to `"pi-picks"` the next time the picker saves a setting.
 
 ## Usage
 

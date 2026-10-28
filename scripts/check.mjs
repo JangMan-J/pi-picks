@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Release gate run by CI (`npm run check`): source parses, the changelog covers
+// Release gate run by CI (`npm run check`): source parses, the favorites tests pass, the changelog covers
 // the version, the tarball holds exactly package.json "files", and the
 // installer copies every packed file.
 
@@ -31,6 +31,10 @@ check("index.ts parses (Node type stripping)", () => {
 	run(process.execPath, ["--check", "index.ts"]);
 });
 
+check("favorites tests pass", () => {
+	run(process.execPath, ["--test", "favorites.test.ts"]);
+});
+
 check(`CHANGELOG.md has a "## ${pkg.version}" section`, () => {
 	const changelog = readFileSync(join(root, "CHANGELOG.md"), "utf8");
 	const heading = `## ${pkg.version}`;
@@ -41,7 +45,9 @@ check(`CHANGELOG.md has a "## ${pkg.version}" section`, () => {
 check("npm pack ships exactly package.json files", () => {
 	const pack = spawnSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], { cwd: root, encoding: "utf8" });
 	if (pack.status !== 0) throw new Error(pack.stderr);
-	const [info] = JSON.parse(pack.stdout);
+	const result = JSON.parse(pack.stdout);
+	// npm 11 returns an array; npm 12 keys the result by package name.
+	const info = Array.isArray(result) ? result[0] : result[pkg.name];
 	const packed = info.files.map((f) => f.path).sort();
 	const missing = shipped.filter((f) => !packed.includes(f));
 	const extra = packed.filter((f) => !shipped.includes(f));

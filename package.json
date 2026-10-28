@@ -8,6 +8,7 @@
   },
   "files": [
     "index.ts",
+    "favorites.ts",
     "scripts/install.js",
     "SKILL.md",
     "CHANGELOG.md",
@@ -20,9 +21,9 @@
     ]
   },
   "peerDependencies": {
-    "@mariozechner/pi-ai": "*",
-    "@mariozechner/pi-coding-agent": "*",
-    "@mariozechner/pi-tui": "*"
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
   },
   "scripts": {
     "check": "node scripts/check.mjs"
