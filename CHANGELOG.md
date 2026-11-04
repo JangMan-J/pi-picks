@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.4.1 — 2026-11-04
+
+- The picker now opens on the All tab instead of Favorites (Favorites remains the first tab, one switch away). The `rememberLastTab` setting is removed: no tab is remembered between opens
+
 ## 1.4.0 — 2026-10-28
 
 - Publish under the scoped name `@jangmanj/pi-picks` (the unscoped `pi-picks` stops at 1.3.1). Remove the old package before installing, so `/models` is not registered twice

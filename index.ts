@@ -5,9 +5,8 @@
  *
  * Tabs are facets over a single list: Favorites, All, then one per
  * provider (A→Z). Typing fuzzy-searches within the current tab; Tab
- * switches tab without touching the query. The picker opens on Favorites
- * when any favorite is
- * available. Favorites is this extension's own list, stored as
+ * switches tab without touching the query. The picker opens on All.
+ * Favorites is this extension's own list, stored as
  * `provider/id` strings under `pi-picks.favorites` in
  * settings.json — independent of pi's native scoped models
  * (`enabledModels`). Ctrl+F toggles the selected model in Favorites
@@ -130,7 +129,6 @@ interface ModelPickerOptions {
 	/** Called with the reason when a favorites change could not be saved. */
 	onFavoritesError: (message: string) => void;
 	currentModel: Model<Api> | undefined;
-	lastTab?: string;
 	onSelect: (model: Model<Api>) => void;
 	onCancel: () => void;
 }
@@ -174,13 +172,9 @@ class ModelPickerComponent {
 		this.categories = Array.from(this.byCategory.keys());
 		this.refreshFavorites();
 
-		// Home is Favorites when any favorite is available; otherwise restore
-		// the saved tab if available, otherwise follow the current model.
+		// Home is always the All tab; Favorites is one Tab away.
 		const cur = opts.currentModel;
-		const startTab = this.resolvedFavorites.length > 0 ? FAVORITES_TAB
-			: opts.lastTab && this.tabs.includes(opts.lastTab) ? opts.lastTab
-			: cur?.provider ?? ALL_TAB;
-		this.catIndex = Math.max(0, this.tabs.indexOf(startTab));
+		this.catIndex = Math.max(0, this.tabs.indexOf(ALL_TAB));
 
 		// Build the search Input
 		this.searchInput = new Input();
@@ -213,7 +207,7 @@ class ModelPickerComponent {
 	}
 
 	private currentTab(): string {
-		return this.tabs[this.catIndex] ?? FAVORITES_TAB;
+		return this.tabs[this.catIndex] ?? ALL_TAB;
 	}
 
 	private onFavoritesTab(): boolean {
@@ -226,10 +220,6 @@ class ModelPickerComponent {
 
 	private refreshFavorites(): void {
 		this.resolvedFavorites = this.opts.favorites.resolve(this.opts.allModels);
-	}
-
-	getLastTab() {
-		return this.currentTab();
 	}
 
 	updateModels(allModels: Model<Api>[], currentModel?: Model<Api>): void {
@@ -695,8 +685,6 @@ class ModelPickerComponent {
 // ─── extension ──────────────────────────────────────────────────────────────
 
 export default function modelPickerExtension(pi: ExtensionAPI) {
-	const rememberLastTab = readSetting("rememberLastTab") !== false;
-	let lastTab: ModelPickerOptions["lastTab"];
 	async function openPicker(ctx: ExtensionContext) {
 		// Same logic as /model: render cached snapshot immediately, refresh in the background
 		const refreshPromise = Promise.resolve(ctx.modelRegistry.refresh());
@@ -719,7 +707,6 @@ export default function modelPickerExtension(pi: ExtensionAPI) {
 			let closed = false;
 			const close = (model: Model<Api> | null) => {
 				closed = true;
-				if (rememberLastTab) lastTab = model?.provider ?? picker.getLastTab();
 				done(model);
 			};
 			const picker = new ModelPickerComponent({
@@ -727,7 +714,6 @@ export default function modelPickerExtension(pi: ExtensionAPI) {
 				favorites,
 				onFavoritesError: (message) => ctx.ui.notify(message, "error"),
 				currentModel: ctx.model ?? undefined,
-				lastTab,
 				onSelect: close,
 				onCancel: () => close(null),
 			});
