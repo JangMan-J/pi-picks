@@ -1,6 +1,6 @@
 {
   "name": "@jangmanj/pi-picks",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Keyboard-driven model picker for the pi coding agent: favorites, provider tabs, and one fuzzy query",
   "type": "module",
   "bin": {
