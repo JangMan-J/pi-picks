@@ -17,18 +17,20 @@ The first tab, **Favorites**, is the picker's own list, independent of pi's nati
   Favorites │ All │ Anthropic │ Antigravity │ Fireworks │ Xai
 ───────────────────────────────────────────────────────────────────
   Search: > claude_
-
-▶ Claude Sonnet ●  [Anthropic]         $3/$15  200k  thinking  vision
+  Model            Provider             Price   Ctx  Modality
+▶ Claude Sonnet ●  [Anthropic]         $3/$15  200k  [T][V]
 
   (1/1) anthropic/claude-sonnet
 ───────────────────────────────────────────────────────────────────
-  ↑↓ Enter select model · ←→ Tab select menu · Ctrl+F toggle favorite · Ctrl+X clear favorites · Esc cancel
+  ↑↓ Enter · Tab · Ctrl+F/X fav · Ctrl+S sort · Esc    [T] thinking [V] vision [G] generation [S] synthesis
 ───────────────────────────────────────────────────────────────────
 ```
 
 - **Active model** highlighted in green with a green `●`; if it is also a favorite, the `●` is gold (on every tab, including Favorites)
 - **Context window** shown as `200k`, `1M`, etc.
-- **Capability tags**: `thinking` (extended reasoning), `vision` (image input)
+- **Column headers** in accent color differentiate the header band from data rows and stay put while you scroll, search, or sort; narrow terminals drop Modality, Ctx, then Price, headers included
+- **Ctrl+S sort** cycles default → Model ▲ → Provider ▲ (Favorites and All) → Price ▲ → Price ▼ → Modality ▼ (vision/multimodal first); the active column carries a gold sort arrow. Price sorts never list $0 or unpriced models as cheapest: they go last
+- **Modality badges**: fixed-lane color-coded `[T]` thinking, `[V]` vision, `[G]` generation (images), `[S]` synthesis (voice), with a right-justified legend on the bottom bar
 - **Search** fuzzy-matches model name, id, and provider within the current tab
 - **Ranked search highlights** — matching tabs and rows get a subtle neutral background, while the best-ranked result gets a distinct search-match background separate from the selected tab highlight
 - **One query everywhere** — switching tabs keeps your query and, when it survives, your selection
@@ -103,6 +105,7 @@ Every tab uses the same fuzzy search; tabs only narrow which models it runs over
 | `Tab` / `Shift+Tab` | Switch tab (Favorites, All, then providers); with a query active, provider tabs with no matches are skipped |
 | `Ctrl+F` | Toggle the selected model in Favorites, on any tab |
 | `Ctrl+X` | Remove favorites contained in the active tab (every favorite on Favorites; only the relevant provider's favorites on a provider tab) |
+| `Ctrl+S` | Cycle the column sort; the selected model stays selected |
 | `←` / `→` | Switch tab when the search field is empty; otherwise move the text cursor |
 | Type | Fuzzy-filter the current tab |
 | `Enter` | Select highlighted model and save it as the default for new sessions |
@@ -113,7 +116,7 @@ It preserves other settings, including the default thinking level.
 
 ## How it works
 
-The picker calls `modelRegistry.refresh()` then `modelRegistry.getAvailable()` — the same data source as pi's built-in `/model` command. Only models with auth configured (API key or OAuth) are shown. Models are grouped by their `provider` field into provider tabs in A→Z order, sorted alphabetically within each tab with the active model first. The All tab instead sorts by model name, then provider, so duplicates offered by several providers sit together.
+The picker calls `modelRegistry.refresh()` then `modelRegistry.getAvailable()` — the same data source as pi's built-in `/model` command. Only models with auth configured (API key or OAuth) are shown. Models are grouped by their `provider` field into provider tabs in A→Z order, sorted alphabetically within each tab with the active model first. The All tab instead sorts by model name, then provider, so duplicates offered by several providers sit together; Favorites keeps its saved order. Ctrl+S picks another sort for every tab.
 
 ## Uninstall
 

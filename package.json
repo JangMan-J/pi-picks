@@ -9,6 +9,7 @@
   "files": [
     "index.ts",
     "favorites.ts",
+    "table.ts",
     "scripts/install.js",
     "SKILL.md",
     "CHANGELOG.md",

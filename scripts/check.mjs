@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Release gate run by CI (`npm run check`): source parses, the favorites tests pass, the changelog covers
+// Release gate run by CI (`npm run check`): source parses, the favorites and table tests pass, the changelog covers
 // the version, the tarball holds exactly package.json "files", and the
 // installer copies every packed file.
 
@@ -31,8 +31,16 @@ check("index.ts parses (Node type stripping)", () => {
 	run(process.execPath, ["--check", "index.ts"]);
 });
 
+check("table.ts parses (Node type stripping)", () => {
+	run(process.execPath, ["--check", "table.ts"]);
+});
+
 check("favorites tests pass", () => {
 	run(process.execPath, ["--test", "favorites.test.ts"]);
+});
+
+check("table tests pass", () => {
+	run(process.execPath, ["--test", "table.test.ts"]);
 });
 
 check(`CHANGELOG.md has a "## ${pkg.version}" section`, () => {

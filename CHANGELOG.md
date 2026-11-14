@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Replace the blank line under Search with an accent-colored column header row (Model, Provider on Favorites and All, Price, Ctx, Modality), collapsing Thinking and Vision into fixed-lane color-coded `[T][V][G][S]` modality badges with a right-justified legend on the bottom bar. Column widths are measured over the whole tab, so headers and cells never shift while scrolling, filtering, or sorting; on narrow terminals Modality, Ctx, then Price drop together with their headers
+- Add Ctrl+S to cycle the column sort: default (saved order on Favorites; model A→Z on All; current model first on a provider tab), Model ▲, Provider ▲ (cross-provider tabs only), Price ▲, Price ▼ ($0 and unpriced models always last), Modality ▼ (vision/multimodal first). The active column carries a gold sort arrow; the selection stays on the same model
+- Move sorting and column layout into a tested module (`table.ts`)
+
 ## 1.4.1 — 2026-11-04
 
 - The picker now opens on the All tab instead of Favorites (Favorites remains the first tab, one switch away). The `rememberLastTab` setting is removed: no tab is remembered between opens

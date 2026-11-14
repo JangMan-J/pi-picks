@@ -12,6 +12,7 @@
  * (`enabledModels`). Ctrl+F toggles the selected model in Favorites
  * from any tab (it stays in its provider tab); Ctrl+X removes the
  * favorites contained in the active tab (every favorite on Favorites).
+ * A header row names the columns; Ctrl+S cycles the column sort.
  *
  * Usage:
  *   /models          — open the categorized picker
@@ -34,6 +35,8 @@ import { Input, Key, fuzzyFilter, matchesKey, truncateToWidth, visibleWidth } fr
 import type { KeyId } from "@earendil-works/pi-tui";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { Favorites } from "./favorites.ts";
+import { MODALITY_LEGEND, activeColumn, headerSegments, layoutTable, modalitySlots, nextSort, providerLabel, rowParts, sortRows, windowStart } from "./table.ts";
+import type { Measure, SortMode, TabKind } from "./table.ts";
 
 // ─── settings ───────────────────────────────────────────────────────────────
 
@@ -71,49 +74,7 @@ function resolveShortcuts(setting = "shortcut", fallback = DEFAULT_SHORTCUT): st
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
-/** Friendly display name for a provider id — derived from the id itself, no hardcoding */
-function providerLabel(id: string): string {
-	return id
-		.split("-")
-		.map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-		.join(" ");
-}
-
-/** Omit identified maker prefixes and redundant provider suffixes, not custom name qualifiers. */
-function modelLabel(model: Model<Api>): string {
-	let name = model.name;
-	const prefix = name.match(/^([^():]+):\s+(?=\S)/);
-	if (prefix) {
-		const maker = prefix[1]!.toLowerCase().replace(/[\s._-]/g, "");
-		const namespace = model.id.includes("/") ? model.id.split("/")[0]! : "";
-		if (maker && [model.provider, namespace].some((id) => id.toLowerCase().replace(/[\s._-]/g, "") === maker)) {
-			name = name.slice(prefix[0].length);
-		}
-	}
-	const suffix = name.match(/\s+\(([^()]*)\)\s*$/);
-	const provider = suffix?.[1].trim().toLowerCase();
-	return suffix && (provider === model.provider.toLowerCase() || provider === providerLabel(model.provider).toLowerCase())
-		? name.slice(0, suffix.index).trimEnd() || name : name;
-}
-
-/** Format context window as human-readable */
-function fmtCtx(tokens: number): string {
-	if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(0)}M`;
-	if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(0)}k`;
-	return String(tokens);
-}
-
-/** Format per-million-token cost as "$in/$out"; omit invalid or all-zero rates. */
-function fmtCost(cost: { input: number; output: number }): string {
-	const rates = [cost?.input, cost?.output];
-	if (!rates.every((n) => Number.isFinite(n) && n >= 0) || !rates.some((n) => n > 0)) return "";
-	const fmt = (n: number) =>
-		n === 0 ? "0"
-		: n < 0.01 ? String(Number(n.toPrecision(2))) // keep sub-cent rates non-zero
-		: n < 1 ? n.toFixed(2)
-		: n.toFixed(2).replace(/\.?0+$/, "");
-	return rates.map((n) => `$${fmt(n)}`).join("/");
-}
+const measure: Measure = { width: visibleWidth, truncate: (text, width) => truncateToWidth(text, width) };
 
 // ─── component ──────────────────────────────────────────────────────────────
 
@@ -160,6 +121,9 @@ class ModelPickerComponent {
 	// every model, sorted by display label then provider so the same model
 	// offered by several providers sits adjacently on the All tab
 	private allSorted: Model<Api>[] = [];
+
+	// Ctrl+S column sort; a search ranks by match score until it is cleared
+	private sortMode: SortMode = "default";
 
 	// the search Input widget
 	private searchInput: Input;
@@ -210,6 +174,11 @@ class ModelPickerComponent {
 		return this.tabs[this.catIndex] ?? ALL_TAB;
 	}
 
+	private tabKind(): TabKind {
+		const tab = this.currentTab();
+		return tab === FAVORITES_TAB ? "favorites" : tab === ALL_TAB ? "all" : "provider";
+	}
+
 	private onFavoritesTab(): boolean {
 		return this.currentTab() === FAVORITES_TAB;
 	}
@@ -256,18 +225,6 @@ class ModelPickerComponent {
 			map.get(m.provider)!.push(m);
 		}
 
-		const cur = this.opts.currentModel;
-
-		// Sort models within each category: active first, then alphabetical
-		for (const [, arr] of map) {
-			arr.sort((a, b) => {
-				const aCur = cur && a.id === cur.id && a.provider === cur.provider ? -1 : 0;
-				const bCur = cur && b.id === cur.id && b.provider === cur.provider ? -1 : 0;
-				if (aCur !== bCur) return aCur - bCur;
-				return a.name.localeCompare(b.name);
-			});
-		}
-
 		// Provider tabs keep a stable A→Z order; the picker opens on the
 		// relevant tab directly, so promoting the current provider would
 		// only rearrange the bar whenever the model changes.
@@ -277,10 +234,7 @@ class ModelPickerComponent {
 
 		// All-tab order: display label, then provider — duplicate models
 		// offered by several providers end up adjacent for comparison.
-		this.allSorted = [...map.values()].flat().sort((a, b) =>
-			modelLabel(a).localeCompare(modelLabel(b))
-			|| a.provider.localeCompare(b.provider)
-			|| a.id.localeCompare(b.id));
+		this.allSorted = sortRows([...map.values()].flat(), "default", "all");
 		return sorted;
 	}
 
@@ -290,7 +244,7 @@ class ModelPickerComponent {
 		return key === FAVORITES_TAB ? "Favorites" : key === ALL_TAB ? "All" : providerLabel(key);
 	}
 
-	/** Source rows for a tab before the query is applied. */
+	/** Source rows for a tab before the query is applied, unsorted. */
 	private tabSource(tabKey: string): Model<Api>[] {
 		return tabKey === FAVORITES_TAB ? this.resolvedFavorites
 			: tabKey === ALL_TAB ? this.allSorted
@@ -299,11 +253,13 @@ class ModelPickerComponent {
 
 	private applyFilter(): void {
 		const query = this.searchInput.getValue().trim();
-		const searchText = (m: Model<Api>) => `${m.name} ${m.id} ${m.provider}`;
+		const searchText = (m: Model<Api>) =>
+			`${m.name} ${m.id} ${m.provider} ${modalitySlots(m).filter((s) => s.present).map((s) => s.label).join(" ")}`;
 		// fuzzyFilter returns the source untouched for an empty query, so
-		// browsing keeps each tab's source order (favorites: stored order).
+		// browsing keeps the chosen sort (Favorites default: stored order).
 		this.globalMatches = fuzzyFilter(this.allSorted, query, searchText);
-		this.filteredRows = fuzzyFilter(this.tabSource(this.currentTab()), query, searchText);
+		const sorted = sortRows(this.tabSource(this.currentTab()), this.sortMode, this.tabKind(), this.opts.currentModel);
+		this.filteredRows = fuzzyFilter(sorted, query, searchText);
 		this.matchingProviders = new Set(this.globalMatches.map((m) => m.provider));
 		// Clamp row selection
 		this.rowIndex = Math.max(0, Math.min(this.rowIndex, this.filteredRows.length - 1));
@@ -371,12 +327,28 @@ class ModelPickerComponent {
 		this.applyFilter();
 	}
 
+	/** Ctrl+S: next column sort, keeping the selected model selected. */
+	private cycleSort(): void {
+		const prevSelected = this.filteredRows[this.rowIndex];
+		this.sortMode = nextSort(this.sortMode, this.tabKind());
+		this.applyFilter();
+		const kept = prevSelected
+			? this.filteredRows.findIndex((m) => modelRef(m) === modelRef(prevSelected))
+			: -1;
+		// The list window is derived from rowIndex, so it scrolls to keep the row in view.
+		this.rowIndex = kept >= 0 ? kept : 0;
+	}
+
 	// ── input handling ───────────────────────────────────────────────────
 
 	handleInput(data: string): void {
 		// Favorite toggle works on every tab; the model stays in its provider tab.
 		if (matchesKey(data, Key.ctrl("f"))) {
 			this.toggleSelectedFavorite();
+			return;
+		}
+		if (matchesKey(data, Key.ctrl("s"))) {
+			this.cycleSort();
 			return;
 		}
 		if (matchesKey(data, Key.ctrl("x"))) {
@@ -460,14 +432,22 @@ class ModelPickerComponent {
 		const inputLines = this.searchInput.render(Math.max(0, width - promptW));
 		lines.push(prompt + (inputLines[0] ?? ""));
 
-		lines.push("");
-
-		// ── model list ───────────────────────────────────────────────────
+		// ── column header (fixed geometry: every row of the tab) ─────────
 		const MAX_VISIBLE = 10;
-		const half = Math.floor(MAX_VISIBLE / 2);
 		const rows = this.filteredRows;
 		const hasQuery = this.searchInput.getValue().trim() !== "";
-		const start = Math.max(0, Math.min(this.rowIndex - half, rows.length - MAX_VISIBLE));
+		const geometry = layoutTable(this.tabSource(this.currentTab()), width, this.crossProvider, measure);
+		const active = activeColumn(this.sortMode, this.tabKind(), hasQuery);
+		lines.push(headerSegments(geometry, active, measure)
+			.map((seg) =>
+				seg.style === "active" ? theme.bold(theme.fg("accent", seg.text))
+				: seg.style === "arrow" ? theme.bold(theme.fg("warning", seg.text))
+				: seg.style === "header" ? theme.fg("accent", seg.text)
+				: seg.text)
+			.join(""));
+
+		// ── model list ───────────────────────────────────────────────────
+		const start = windowStart(this.rowIndex, rows.length, MAX_VISIBLE);
 		const visible = rows.slice(start, start + MAX_VISIBLE);
 
 		if (rows.length === 0) {
@@ -489,25 +469,6 @@ class ModelPickerComponent {
 			}
 			lines.push(theme.fg("muted", truncateToWidth(msg, width)));
 		} else {
-			// Cross-provider tabs (Favorites, All) show the provider column.
-			const showProvider = this.crossProvider;
-			// Measure over every row so columns do not move when the list scrolls.
-			const measured = showProvider ? rows : visible;
-			const colW = {
-				name: showProvider ? Math.max(...rows.map((m) => visibleWidth(modelLabel(m)))) : 0,
-				provider: showProvider ? Math.max(...rows.map((m) => visibleWidth(`[${providerLabel(m.provider)}]`))) : 0,
-				cost: Math.max(0, ...measured.map((m) => visibleWidth(fmtCost(m.cost)))),
-				ctx: Math.max(0, ...measured.map((m) => visibleWidth(m.contextWindow ? fmtCtx(m.contextWindow) : ""))),
-				thinking: measured.some((m) => m.reasoning) ? "thinking".length : 0,
-				vision: measured.some((m) => m.input.includes("image")) ? "vision".length : 0,
-			};
-			// Keep the model and provider identifiable before showing optional metadata.
-			for (const column of ["cost", "vision", "thinking", "ctx"] as const) {
-				const infoWidth = Math.max(0, [colW.cost, colW.ctx, colW.thinking, colW.vision].filter(Boolean).reduce((sum, n) => sum + n + 2, -2));
-				const labelWidth = showProvider ? colW.name + colW.provider + 8 : 16;
-				if (infoWidth + labelWidth <= width) break;
-				colW[column] = 0;
-			}
 			for (let i = 0; i < visible.length; i++) {
 				const model = visible[i]!;
 				const absIdx = start + i;
@@ -518,7 +479,7 @@ class ModelPickerComponent {
 				// fuzzyFilter sorts by score, so visible order is rank order:
 				// row 0 is the best match for the active query.
 				const fuzzyHighlight = hasQuery ? (absIdx === 0 ? "top" : "match") : undefined;
-				lines.push(this.renderRow(model, isSelected, isCurrent, width, theme, colW, fuzzyHighlight));
+				lines.push(this.renderRow(model, isSelected, isCurrent, geometry, theme, fuzzyHighlight));
 			}
 		}
 		// The empty-state message occupies one row; keep the count slot too.
@@ -532,16 +493,19 @@ class ModelPickerComponent {
 		// One line, always: truncate rather than wrap so the height never changes.
 		lines.push(theme.fg("dim", truncateToWidth(details, width)));
 
-		// ── help bar ─────────────────────────────────────────────────────
+		// ── help bar + right-justified modality legend ──────────────────
 		lines.push(theme.fg("border", "─".repeat(width)));
-		const help = [
-			"↑↓ Enter select model",
-			"←→ Tab select menu",
-			"Ctrl+F toggle favorite",
-			"Ctrl+X clear favorites",
-			"Esc cancel",
-		].join(" · ");
-		lines.push(theme.fg("dim", truncateToWidth("  " + help, width)));
+		const leftHelp = "  ↑↓ Enter · Tab · Ctrl+F/X fav · Ctrl+S sort · Esc";
+		const legendPlain = `${MODALITY_LEGEND.map((m) => `[${m.code}] ${m.label}`).join(" ")}  `;
+		const legendStyled = `${MODALITY_LEGEND.map((m) => theme.fg(m.color, `[${m.code}]`) + theme.fg("dim", ` ${m.label}`)).join(" ")}${theme.fg("dim", "  ")}`;
+		const legendW = visibleWidth(legendPlain);
+		if (width >= legendW + 24) {
+			const leftTrunc = truncateToWidth(leftHelp, width - legendW - 2, "…");
+			const gap = " ".repeat(Math.max(2, width - visibleWidth(leftTrunc) - legendW));
+			lines.push(theme.fg("dim", leftTrunc) + gap + legendStyled);
+		} else {
+			lines.push(theme.fg("dim", truncateToWidth(leftHelp, width, "…")));
+		}
 		lines.push(theme.fg("accent", "─".repeat(width)));
 
 		// Tiny terminal resizes must not emit over-wide prompts, markers, or wide glyphs.
@@ -619,23 +583,11 @@ class ModelPickerComponent {
 		model: Model<Api>,
 		isSelected: boolean,
 		isCurrent: boolean,
-		width: number,
+		geometry: ReturnType<typeof layoutTable>,
 		theme: any,
-		colW: { name: number; provider: number; cost: number; ctx: number; thinking: number; vision: number },
 		fuzzyHighlight?: "match" | "top",
 	): string {
 		const prefix = isSelected ? "▶ " : "  ";
-		const ctxStr = model.contextWindow ? fmtCtx(model.contextWindow) : "";
-		const costStr = fmtCost(model.cost);
-		// Pad blank cells too, so missing values cannot shift the other columns.
-		const right = [
-			colW.cost ? costStr.padStart(colW.cost) : "",
-			colW.ctx ? ctxStr.padStart(colW.ctx) : "",
-			colW.thinking ? (model.reasoning ? "thinking" : "").padEnd(colW.thinking) : "",
-			colW.vision ? (model.input.includes("image") ? "vision" : "").padEnd(colW.vision) : "",
-		].filter(Boolean).join("  ");
-
-		const showProvider = this.crossProvider;
 		const isFav = this.isFavorite(model);
 		// One status dot per row, coloured by meaning:
 		//   current model            → green (success)
@@ -645,29 +597,21 @@ class ModelPickerComponent {
 		const dotColor = isCurrent ? (isFav ? "warning" : "success")
 			: isFav && !this.onFavoritesTab() ? "warning"
 			: undefined;
-		const dot = dotColor ? " ●" : "";
-		const nameAvail = Math.max(0, width - visibleWidth(prefix) - visibleWidth(right) - (showProvider ? 2 : visibleWidth(dot)) - 2);
-		const providerWidth = showProvider ? Math.min(colW.provider, Math.max(0, nameAvail - 12)) : 0;
-		const nameWidth = showProvider ? Math.min(colW.name, Math.max(0, nameAvail - providerWidth - 2)) : nameAvail;
-		const name = truncateToWidth(modelLabel(model), nameWidth);
-		const provider = showProvider && providerWidth >= 2 ? `[${truncateToWidth(providerLabel(model.provider), providerWidth - 2)}]` : "";
-		const tail = showProvider
-			? " ".repeat(Math.max(0, nameWidth + 2 - visibleWidth(name + dot))) + "  " + provider
+		// Cells sit at the tab's fixed column offsets, shared with the header.
+		const { name, dot, tail, right, modality } = rowParts(geometry, model, !!dotColor, measure);
+		const modalityStyled = modality
+			? modality.map((s) => (s.present ? theme.fg(s.color, isSelected ? theme.bold(`[${s.code}]`) : `[${s.code}]`) : "   ")).join("")
 			: "";
-		const gap = " ".repeat(
-			Math.max(0, width - visibleWidth(prefix + name + dot + tail) - visibleWidth(right)),
-		);
 
 		// Row colour: selected → accent, current → green, otherwise default.
-		// Favorite state is carried by the dot alone. The dot keeps its own
-		// colour on every row, including the selected one, so it is coloured
-		// separately from the text around it.
+		// Favorite state is carried by the dot alone. The dot and modality badges
+		// keep their own semantic colours on every row, including the selected one.
 		const rowColor = isSelected ? "accent" : isCurrent ? "success" : "text";
 		const rightColor = isSelected ? "accent" : isCurrent ? "muted" : "dim";
 		const left = theme.fg(rowColor, prefix + name)
 			+ (dotColor ? theme.fg(dotColor, theme.bold(dot)) : "")
 			+ (tail ? theme.fg(rowColor, tail) : "");
-		const line = left + gap + theme.fg(rightColor, isSelected ? theme.bold(right) : right);
+		const line = left + theme.fg(rightColor, isSelected ? theme.bold(right) : right) + modalityStyled;
 		// Fuzzy matches sit on a subtle neutral panel. The best-ranked row uses
 		// the theme's dedicated search-match background instead. Both deliberately
 		// differ from selectedBg, which remains the selected tab's highlight.

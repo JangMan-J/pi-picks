@@ -19,6 +19,7 @@ Open the categorized model picker with `/models` or `Ctrl+\`.
 | `Shift+↑` / `Shift+↓` | Move ten results, stopping at either end |
 | `Ctrl+F` | Toggle the selected model in Favorites, on any tab (keeps it in its provider tab) |
 | `Ctrl+X` | Remove favorites contained in the active tab |
+| `Ctrl+S` | Cycle the column sort (default, Model, Provider, Price ▲/▼, Modality) |
 | `Tab` / `Shift+Tab` | Switch tab; with a query active, provider tabs with no matches are skipped |
 | `←` / `→` | Switch tab when the search field is empty; otherwise move the text cursor |
 | Type | Fuzzy-filter the current tab |
