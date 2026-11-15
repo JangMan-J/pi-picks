@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.6.0 — 2026-11-15
 
 - The title now sits in the top rule (`─ Select Model ─────`) instead of on its own line between two rules, which makes the picker two lines shorter
 - The frame (which lines there are, the rules, the title line, ten rows, how wide the text is) moved into `frame.ts`, a file pi-picks shares with pi-hashline so the two pickers stay alike
