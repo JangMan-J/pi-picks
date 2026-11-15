@@ -1,10 +1,11 @@
 # Changelog
 
-## Unreleased
+## 1.5.0 — 2026-11-15
 
 - Replace the blank line under Search with an accent-colored column header row (Model, Provider on Favorites and All, Price, Ctx, Modality), collapsing Thinking and Vision into fixed-lane color-coded `[T][V][G][S]` modality badges with a right-justified legend on the bottom bar. Column widths are measured over the whole tab, so headers and cells never shift while scrolling, filtering, or sorting; on narrow terminals Modality, Ctx, then Price drop together with their headers
-- Add Ctrl+S to cycle the column sort: default (saved order on Favorites; model A→Z on All; current model first on a provider tab), Model ▲, Provider ▲ (cross-provider tabs only), Price ▲, Price ▼ ($0 and unpriced models always last), Modality ▼ (vision/multimodal first). The active column carries a gold sort arrow; the selection stays on the same model
+- Add Ctrl+S to cycle `▲` then `▼` across every visible column left to right: Model ▲/▼, Provider ▲/▼ (cross-provider tabs), Price ▲/▼ ($0 and unpriced models last), Ctx ▲/▼ (unknown last), Modality ▲/▼, plus tab default when distinct (saved order on Favorites; active model pinned first on its provider tab; fuzzy rank during search). Only columns governed by the current order carry a gold sort arrow; the selection stays on the same model
 - Move sorting and column layout into a tested module (`table.ts`)
+- On a screen wider than 128 columns the picker's text no longer stretches edge to edge: tabs, rows, the status line and the legend stop where Price, Ctx and Modality end, which is column 128 until the terminal's midline passes those columns and centred on it from then on. Only the rules span the terminal. Windows up to 128 columns are unchanged
 
 ## 1.4.1 — 2026-11-04
 

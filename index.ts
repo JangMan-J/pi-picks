@@ -35,8 +35,11 @@ import { Input, Key, fuzzyFilter, matchesKey, truncateToWidth, visibleWidth } fr
 import type { KeyId } from "@earendil-works/pi-tui";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { Favorites } from "./favorites.ts";
-import { MODALITY_LEGEND, activeColumn, headerSegments, layoutTable, modalitySlots, nextSort, providerLabel, rowParts, sortRows, windowStart } from "./table.ts";
-import type { Measure, SortMode, TabKind } from "./table.ts";
+import {
+	MODALITY_LEGEND, activeColumn, contentWidth, effectiveSort, headerSegments, layoutTable, modalitySlots, nextSortState,
+	pinsCurrentFirst, providerLabel, rowParts, sortRows, visibleColumnsOf, windowStart,
+} from "./table.ts";
+import type { Column, Measure, SortContext, SortMode, TabKind } from "./table.ts";
 
 // ─── settings ───────────────────────────────────────────────────────────────
 
@@ -122,8 +125,11 @@ class ModelPickerComponent {
 	// offered by several providers sits adjacently on the All tab
 	private allSorted: Model<Api>[] = [];
 
-	// Ctrl+S column sort; a search ranks by match score until it is cleared
+	// Ctrl+S column sort; typing a search ranks by fuzzy match until Ctrl+S or query clear
 	private sortMode: SortMode = "default";
+	private searchRanked = false;
+	private lastWidth: number | undefined;
+	private topMatchRef: string | undefined;
 
 	// the search Input widget
 	private searchInput: Input;
@@ -251,15 +257,40 @@ class ModelPickerComponent {
 			: this.byCategory.get(tabKey) ?? [];
 	}
 
+	private visibleColumns(): Column[] | undefined {
+		if (this.lastWidth === undefined) return undefined;
+		return visibleColumnsOf(layoutTable(this.tabSource(this.currentTab()), this.lastWidth, this.crossProvider, measure));
+	}
+
+	private sortCtx(): SortContext {
+		const kind = this.tabKind();
+		const tabRows = this.tabSource(this.currentTab());
+		const hasQuery = this.searchInput.getValue().trim() !== "";
+		return {
+			kind,
+			pinnedCurrent: kind === "provider" && pinsCurrentFirst(tabRows, this.opts.currentModel),
+			hasQuery,
+			searchRanked: this.searchRanked,
+			visibleColumns: this.visibleColumns(),
+		};
+	}
+
 	private applyFilter(): void {
 		const query = this.searchInput.getValue().trim();
 		const searchText = (m: Model<Api>) =>
 			`${m.name} ${m.id} ${m.provider} ${modalitySlots(m).filter((s) => s.present).map((s) => s.label).join(" ")}`;
-		// fuzzyFilter returns the source untouched for an empty query, so
-		// browsing keeps the chosen sort (Favorites default: stored order).
 		this.globalMatches = fuzzyFilter(this.allSorted, query, searchText);
-		const sorted = sortRows(this.tabSource(this.currentTab()), this.sortMode, this.tabKind(), this.opts.currentModel);
-		this.filteredRows = fuzzyFilter(sorted, query, searchText);
+		const tabRows = this.tabSource(this.currentTab());
+		const ctx = this.sortCtx();
+		const eff = effectiveSort(this.sortMode, ctx);
+		if (query) {
+			const matched = fuzzyFilter(tabRows, query, searchText);
+			this.topMatchRef = matched[0] ? modelRef(matched[0]) : undefined;
+			this.filteredRows = eff === "default" ? matched : sortRows(matched, eff, ctx, this.opts.currentModel);
+		} else {
+			this.topMatchRef = undefined;
+			this.filteredRows = sortRows(tabRows, eff, ctx, this.opts.currentModel);
+		}
 		this.matchingProviders = new Set(this.globalMatches.map((m) => m.provider));
 		// Clamp row selection
 		this.rowIndex = Math.max(0, Math.min(this.rowIndex, this.filteredRows.length - 1));
@@ -330,7 +361,9 @@ class ModelPickerComponent {
 	/** Ctrl+S: next column sort, keeping the selected model selected. */
 	private cycleSort(): void {
 		const prevSelected = this.filteredRows[this.rowIndex];
-		this.sortMode = nextSort(this.sortMode, this.tabKind());
+		const next = nextSortState(this.sortMode, this.sortCtx());
+		this.sortMode = next.mode;
+		this.searchRanked = next.searchRanked;
 		this.applyFilter();
 		const kept = prevSelected
 			? this.filteredRows.findIndex((m) => modelRef(m) === modelRef(prevSelected))
@@ -407,6 +440,7 @@ class ModelPickerComponent {
 		const after = this.searchInput.getValue();
 
 		if (before !== after) {
+			this.searchRanked = after.trim() !== "";
 			this.rowIndex = 0;
 			this.applyFilter();
 		}
@@ -414,18 +448,29 @@ class ModelPickerComponent {
 
 	// ── rendering ────────────────────────────────────────────────────────
 
-	render(width: number, theme: any): string[] {
+	render(termWidth: number, theme: any): string[] {
+		// On a wide screen the text stops short of the right edge; only the rules span the terminal.
+		const width = contentWidth(termWidth);
+		if (this.lastWidth !== width) {
+			const prevSelected = this.filteredRows[this.rowIndex];
+			this.lastWidth = width;
+			this.applyFilter();
+			if (prevSelected) {
+				const kept = this.filteredRows.findIndex((m) => modelRef(m) === modelRef(prevSelected));
+				if (kept >= 0) this.rowIndex = kept;
+			}
+		}
 		const lines: string[] = [
-			theme.fg("accent", "─".repeat(width)),
+			theme.fg("accent", "─".repeat(termWidth)),
 			truncateToWidth(theme.fg("accent", theme.bold("  Select Model")), width),
-			theme.fg("border", "─".repeat(width)),
+			theme.fg("border", "─".repeat(termWidth)),
 		];
 
 		// ── tab bar ──────────────────────────────────────────────────────
 		lines.push(this.renderTabs(width, theme));
 
 		// ── search field ─────────────────────────────────────────────────
-		lines.push(theme.fg("border", "─".repeat(width)));
+		lines.push(theme.fg("border", "─".repeat(termWidth)));
 		const promptText = "  Search: ";
 		const prompt = theme.fg("muted", promptText);
 		const promptW = visibleWidth(promptText);
@@ -437,7 +482,7 @@ class ModelPickerComponent {
 		const rows = this.filteredRows;
 		const hasQuery = this.searchInput.getValue().trim() !== "";
 		const geometry = layoutTable(this.tabSource(this.currentTab()), width, this.crossProvider, measure);
-		const active = activeColumn(this.sortMode, this.tabKind(), hasQuery);
+		const active = activeColumn(this.sortMode, this.sortCtx());
 		lines.push(headerSegments(geometry, active, measure)
 			.map((seg) =>
 				seg.style === "active" ? theme.bold(theme.fg("accent", seg.text))
@@ -476,9 +521,9 @@ class ModelPickerComponent {
 				const isCurrent =
 					this.opts.currentModel?.id === model.id &&
 					this.opts.currentModel?.provider === model.provider;
-				// fuzzyFilter sorts by score, so visible order is rank order:
-				// row 0 is the best match for the active query.
-				const fuzzyHighlight = hasQuery ? (absIdx === 0 ? "top" : "match") : undefined;
+				const fuzzyHighlight = hasQuery
+					? (this.topMatchRef === modelRef(model) ? "top" : "match")
+					: undefined;
 				lines.push(this.renderRow(model, isSelected, isCurrent, geometry, theme, fuzzyHighlight));
 			}
 		}
@@ -494,7 +539,7 @@ class ModelPickerComponent {
 		lines.push(theme.fg("dim", truncateToWidth(details, width)));
 
 		// ── help bar + right-justified modality legend ──────────────────
-		lines.push(theme.fg("border", "─".repeat(width)));
+		lines.push(theme.fg("border", "─".repeat(termWidth)));
 		const leftHelp = "  ↑↓ Enter · Tab · Ctrl+F/X fav · Ctrl+S sort · Esc";
 		const legendPlain = `${MODALITY_LEGEND.map((m) => `[${m.code}] ${m.label}`).join(" ")}  `;
 		const legendStyled = `${MODALITY_LEGEND.map((m) => theme.fg(m.color, `[${m.code}]`) + theme.fg("dim", ` ${m.label}`)).join(" ")}${theme.fg("dim", "  ")}`;
@@ -506,10 +551,10 @@ class ModelPickerComponent {
 		} else {
 			lines.push(theme.fg("dim", truncateToWidth(leftHelp, width, "…")));
 		}
-		lines.push(theme.fg("accent", "─".repeat(width)));
+		lines.push(theme.fg("accent", "─".repeat(termWidth)));
 
 		// Tiny terminal resizes must not emit over-wide prompts, markers, or wide glyphs.
-		return lines.map((line) => truncateToWidth(line, width));
+		return lines.map((line) => truncateToWidth(line, termWidth));
 	}
 
 	private renderTabs(width: number, theme: any): string {

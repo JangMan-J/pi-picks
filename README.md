@@ -29,7 +29,7 @@ The first tab, **Favorites**, is the picker's own list, independent of pi's nati
 - **Active model** highlighted in green with a green `●`; if it is also a favorite, the `●` is gold (on every tab, including Favorites)
 - **Context window** shown as `200k`, `1M`, etc.
 - **Column headers** in accent color differentiate the header band from data rows and stay put while you scroll, search, or sort; narrow terminals drop Modality, Ctx, then Price, headers included
-- **Ctrl+S sort** cycles default → Model ▲ → Provider ▲ (Favorites and All) → Price ▲ → Price ▼ → Modality ▼ (vision/multimodal first); the active column carries a gold sort arrow. Price sorts never list $0 or unpriced models as cheapest: they go last
+- **Ctrl+S sort** cycles `▲` then `▼` across every visible column left to right (Model ▲/▼, Provider ▲/▼ on cross-provider tabs, Price ▲/▼, Ctx ▲/▼, Modality ▲/▼, plus tab default when distinct); the active column carries a gold sort arrow. Price and Ctx sorts keep $0/missing values last
 - **Modality badges**: fixed-lane color-coded `[T]` thinking, `[V]` vision, `[G]` generation (images), `[S]` synthesis (voice), with a right-justified legend on the bottom bar
 - **Search** fuzzy-matches model name, id, and provider within the current tab
 - **Ranked search highlights** — matching tabs and rows get a subtle neutral background, while the best-ranked result gets a distinct search-match background separate from the selected tab highlight

@@ -18,7 +18,18 @@ export interface TableModel {
 	output?: readonly string[];
 }
 
-export type SortMode = "default" | "model" | "provider" | "price-asc" | "price-desc" | "vision";
+export type SortMode =
+	| "default"
+	| "model-asc"
+	| "model-desc"
+	| "provider-asc"
+	| "provider-desc"
+	| "price-asc"
+	| "price-desc"
+	| "ctx-asc"
+	| "ctx-desc"
+	| "modality-asc"
+	| "modality-desc";
 /** favorites and all span providers; provider is a single-provider tab. */
 export type TabKind = "favorites" | "all" | "provider";
 export type MetaColumn = "cost" | "ctx" | "modality";
@@ -42,8 +53,33 @@ export const MODALITY_LEGEND: readonly Omit<ModalitySlot, "present">[] = [
 	{ code: "S", label: "synthesis", color: "thinkingXhigh" },
 ];
 
-/** Ctrl+S cycle order. */
-export const SORT_MODES: readonly SortMode[] = ["default", "model", "provider", "price-asc", "price-desc", "vision"];
+/** Ctrl+S cycle order: tab default (when distinct), then ▲ and ▼ on every column left to right. */
+export const SORT_MODES: readonly SortMode[] = [
+	"default",
+	"model-asc",
+	"model-desc",
+	"provider-asc",
+	"provider-desc",
+	"price-asc",
+	"price-desc",
+	"ctx-asc",
+	"ctx-desc",
+	"modality-asc",
+	"modality-desc",
+];
+
+const SORT_INFO: Record<Exclude<SortMode, "default">, { column: Column; arrow: "▲" | "▼" }> = {
+	"model-asc": { column: "model", arrow: "▲" },
+	"model-desc": { column: "model", arrow: "▼" },
+	"provider-asc": { column: "provider", arrow: "▲" },
+	"provider-desc": { column: "provider", arrow: "▼" },
+	"price-asc": { column: "cost", arrow: "▲" },
+	"price-desc": { column: "cost", arrow: "▼" },
+	"ctx-asc": { column: "ctx", arrow: "▲" },
+	"ctx-desc": { column: "ctx", arrow: "▼" },
+	"modality-asc": { column: "modality", arrow: "▲" },
+	"modality-desc": { column: "modality", arrow: "▼" },
+};
 /** Metadata columns, left to right. */
 export const META_COLUMNS: readonly MetaColumn[] = ["cost", "ctx", "modality"];
 /** Narrow widths drop metadata columns in this order. */
@@ -64,7 +100,7 @@ const HEADER_RESERVE: Record<Column, number> = {
 	model: "Model ▲".length,
 	provider: "Provider ▲".length,
 	cost: "Price ▲".length,
-	ctx: "Ctx".length,
+	ctx: "Ctx ▲".length,
 	modality: Math.max("Modality ▼".length, MODALITY_WIDTH),
 };
 
@@ -143,78 +179,154 @@ export function fmtModality(model: TableModel): string {
 	return modalitySlots(model).map((s) => (s.present ? `[${s.code}]` : "   ")).join("");
 }
 
-const hasVision = (m: TableModel) => hasModality(m, "V");
 const modalityCount = (m: TableModel) => MODALITY_LEGEND.reduce((n, e) => n + Number(hasModality(m, e.code)), 0);
+const modalityRank = (m: TableModel) =>
+	(hasModality(m, "V") ? 8 : 0)
+	+ (hasModality(m, "T") ? 4 : 0)
+	+ (hasModality(m, "G") ? 2 : 0)
+	+ (hasModality(m, "S") ? 1 : 0);
 
 // ─── sorting ────────────────────────────────────────────────────────────────
 
-/** A single-provider tab has no Provider column, so Provider ▲ reads as Model ▲. */
-export function effectiveSort(mode: SortMode, kind: TabKind): SortMode {
-	return kind === "provider" && mode === "provider" ? "model" : mode;
+export interface SortContext {
+	kind: TabKind;
+	/** True when `kind === "provider"` and `currentModel` sits ahead of alphabetical index 0. */
+	pinnedCurrent?: boolean;
+	/** Non-empty search query is present. */
+	hasQuery?: boolean;
+	/** True while search query ranks rows by fuzzy match (before Ctrl+S overrides it). */
+	searchRanked?: boolean;
+	/** Visible columns at current terminal width (defaults to all columns for `kind`). */
+	visibleColumns?: readonly Column[];
 }
 
-/** The mode after one Ctrl+S, skipping Provider ▲ on single-provider tabs. */
-export function nextSort(mode: SortMode, kind: TabKind): SortMode {
-	const cycle = SORT_MODES.filter((m) => kind !== "provider" || m !== "provider");
-	return cycle[(cycle.indexOf(effectiveSort(mode, kind)) + 1) % cycle.length]!;
-}
+const normCtx = (ctx: SortContext | TabKind): SortContext => (typeof ctx === "string" ? { kind: ctx } : ctx);
+const defaultColumns = (kind: TabKind): Column[] =>
+	kind === "provider" ? ["model", ...META_COLUMNS] : ["model", "provider", ...META_COLUMNS];
 
-/**
- * The sorted column and its arrow, or null when no single column governs order:
- * during a search (fuzzy rank governs order) and on Favorites in saved order.
- */
-export function activeColumn(mode: SortMode, kind: TabKind, hasQuery: boolean): { column: Column; arrow: "▲" | "▼" } | null {
-	if (hasQuery) return null;
-	switch (effectiveSort(mode, kind)) {
-		case "default": return kind === "favorites" ? null : { column: "model", arrow: "▲" };
-		case "model": return { column: "model", arrow: "▲" };
-		case "provider": return { column: "provider", arrow: "▲" };
-		case "price-asc": return { column: "cost", arrow: "▲" };
-		case "price-desc": return { column: "cost", arrow: "▼" };
-		case "vision": return { column: "modality", arrow: "▼" };
-	}
+export function visibleColumnsOf(g: Geometry): Column[] {
+	return ["model", ...(g.showProvider ? ["provider" as const] : []), ...g.meta.map((m) => m.column)];
 }
 
 const rate = (n: number | undefined) => (Number.isFinite(n) && n! > 0 ? n! : 0);
 const isPaid = (m: TableModel) => rate(m.cost?.output) > 0 || rate(m.cost?.input) > 0;
-const byModel = (a: TableModel, b: TableModel) =>
-	modelLabel(a).localeCompare(modelLabel(b)) || a.provider.localeCompare(b.provider) || a.id.localeCompare(b.id);
-const byProvider = (a: TableModel, b: TableModel) =>
-	providerLabel(a.provider).localeCompare(providerLabel(b.provider))
-	|| modelLabel(a).localeCompare(modelLabel(b)) || a.id.localeCompare(b.id);
+const ctxTokens = (m: TableModel) =>
+	m.contextWindow && Number.isFinite(m.contextWindow) && m.contextWindow > 0 ? m.contextWindow : 0;
+const byModelAsc = (a: TableModel, b: TableModel) =>
+	modelLabel(a).localeCompare(modelLabel(b))
+	|| providerLabel(a.provider).localeCompare(providerLabel(b.provider))
+	|| a.id.localeCompare(b.id);
+const byModelDesc = (a: TableModel, b: TableModel) =>
+	modelLabel(b).localeCompare(modelLabel(a))
+	|| providerLabel(a.provider).localeCompare(providerLabel(b.provider))
+	|| a.id.localeCompare(b.id);
+const byProvider = (dir: 1 | -1) => (a: TableModel, b: TableModel) =>
+	dir * providerLabel(a.provider).localeCompare(providerLabel(b.provider)) || byModelAsc(a, b);
 /** Paid models by `dir` price, then $0 / unpriced models A→Z, never mixed. */
 const byPrice = (dir: 1 | -1) => (a: TableModel, b: TableModel) =>
 	Number(isPaid(b)) - Number(isPaid(a))
 	|| (isPaid(a)
-		? dir * (rate(a.cost?.output) - rate(b.cost?.output)) || dir * (rate(a.cost?.input) - rate(b.cost?.input))
-			|| modelLabel(a).localeCompare(modelLabel(b))
-		: 0)
-	|| byModel(a, b);
+		? dir * (rate(a.cost?.output) - rate(b.cost?.output))
+			|| dir * (rate(a.cost?.input) - rate(b.cost?.input))
+			|| byModelAsc(a, b)
+		: byModelAsc(a, b));
+/** Known context windows by `dir`, then missing/0 context windows A→Z. */
+const byCtx = (dir: 1 | -1) => (a: TableModel, b: TableModel) =>
+	Number(ctxTokens(b) > 0) - Number(ctxTokens(a) > 0)
+	|| (ctxTokens(a) > 0 ? dir * (ctxTokens(a) - ctxTokens(b)) || byModelAsc(a, b) : byModelAsc(a, b));
+/** Modality badge count by `dir`, tie-breaking by capability weight (`V > T > G > S`), then Model ▲. */
+const byModality = (dir: 1 | -1) => (a: TableModel, b: TableModel) =>
+	dir * (modalityCount(a) - modalityCount(b))
+	|| dir * (modalityRank(a) - modalityRank(b))
+	|| byModelAsc(a, b);
+
+/** True when `current` exists in `rows` and would move ahead of the first `Model ▲` row in default mode. */
+export function pinsCurrentFirst(rows: readonly TableModel[], current?: { provider: string; id: string }): boolean {
+	if (!current || rows.length <= 1) return false;
+	if (!rows.some((m) => m.provider === current.provider && m.id === current.id)) return false;
+	const first = rows.reduce((best, m) => (byModelAsc(m, best) < 0 ? m : best), rows[0]!);
+	return !(first.provider === current.provider && first.id === current.id);
+}
+
+function hasDistinctDefault(c: SortContext): boolean {
+	if (c.hasQuery) return true;
+	if (c.kind === "favorites") return true;
+	if (c.kind === "provider") return Boolean(c.pinnedCurrent);
+	return false;
+}
+
+/** Effective sort mode for the active tab, query state, and visible columns. */
+export function effectiveSort(mode: SortMode, ctx: SortContext | TabKind): SortMode {
+	const c = normCtx(ctx);
+	if (c.hasQuery && c.searchRanked) return "default";
+	const cols = new Set(c.visibleColumns ?? defaultColumns(c.kind));
+	if (mode === "default") return hasDistinctDefault(c) ? "default" : "model-asc";
+	if (!cols.has(SORT_INFO[mode].column)) return hasDistinctDefault(c) ? "default" : "model-asc";
+	return mode;
+}
+
+function sortCycle(c: SortContext): SortMode[] {
+	const cols = new Set(c.visibleColumns ?? defaultColumns(c.kind));
+	const colModes = (Object.keys(SORT_INFO) as Exclude<SortMode, "default">[]).filter((m) => cols.has(SORT_INFO[m].column));
+	return hasDistinctDefault(c) ? ["default", ...colModes] : colModes;
+}
+
+/** Next sort mode and search-ranking flag after one Ctrl+S press. */
+export function nextSortState(mode: SortMode, ctx: SortContext | TabKind): { mode: SortMode; searchRanked: boolean } {
+	const c = normCtx(ctx);
+	const cycle = sortCycle(c);
+	const cur = effectiveSort(mode, c);
+	const next = cycle[(cycle.indexOf(cur) + 1) % cycle.length]!;
+	return { mode: next, searchRanked: Boolean(c.hasQuery && next === "default") };
+}
+
+/** Next sort mode after one Ctrl+S press. */
+export function nextSort(mode: SortMode, ctx: SortContext | TabKind): SortMode {
+	return nextSortState(mode, ctx).mode;
+}
+
+/**
+ * The sorted column and its arrow, or null when no single column governs order:
+ * fuzzy-ranked searches, saved Favorites order, and provider tabs pinning the active model out of order.
+ */
+export function activeColumn(mode: SortMode, ctx: SortContext | TabKind): { column: Column; arrow: "▲" | "▼" } | null {
+	const eff = effectiveSort(mode, ctx);
+	return eff === "default" ? null : SORT_INFO[eff];
+}
 
 /**
  * Rows of a tab in `mode` order; never mutates `rows`. Default keeps the
  * stored Favorites order, sorts All by model then provider, and puts the
  * current model first on a provider tab.
  */
-export function sortRows<T extends TableModel>(rows: readonly T[], mode: SortMode, kind: TabKind, current?: { provider: string; id: string }): T[] {
+export function sortRows<T extends TableModel>(
+	rows: readonly T[],
+	mode: SortMode,
+	ctx: SortContext | TabKind,
+	current?: { provider: string; id: string },
+): T[] {
 	const out = [...rows];
-	switch (effectiveSort(mode, kind)) {
+	const c = typeof ctx === "string"
+		? { kind: ctx, pinnedCurrent: ctx === "provider" && pinsCurrentFirst(rows, current) }
+		: ctx;
+	switch (effectiveSort(mode, c)) {
 		case "default":
-			if (kind === "favorites") return out;
-			if (kind === "all") return out.sort(byModel);
+			if (c.kind === "favorites" || c.hasQuery) return out;
+			if (c.kind === "all") return out.sort(byModelAsc);
 			{
 				const isCur = (m: T) => (current && m.provider === current.provider && m.id === current.id ? 0 : 1);
-				return out.sort((a, b) => isCur(a) - isCur(b) || byModel(a, b));
+				return out.sort((a, b) => isCur(a) - isCur(b) || byModelAsc(a, b));
 			}
-		case "model": return out.sort(byModel);
-		case "provider": return out.sort(byProvider);
+		case "model-asc": return out.sort(byModelAsc);
+		case "model-desc": return out.sort(byModelDesc);
+		case "provider-asc": return out.sort(byProvider(1));
+		case "provider-desc": return out.sort(byProvider(-1));
 		case "price-asc": return out.sort(byPrice(1));
 		case "price-desc": return out.sort(byPrice(-1));
-		case "vision":
-			return out.sort((a, b) =>
-				Number(hasVision(b)) - Number(hasVision(a))
-				|| modalityCount(b) - modalityCount(a)
-				|| byModel(a, b));
+		case "ctx-asc": return out.sort(byCtx(1));
+		case "ctx-desc": return out.sort(byCtx(-1));
+		case "modality-asc": return out.sort(byModality(1));
+		case "modality-desc": return out.sort(byModality(-1));
 	}
 }
 
@@ -245,6 +357,22 @@ export interface Geometry {
 	providerW: number;
 	/** Visible metadata columns, left to right. */
 	meta: { column: MetaColumn; x: number; w: number }[];
+}
+
+/** Widest terminal the picker fills edge to edge. */
+const WINDOW_W = 128;
+/** Price, Ctx and Modality at their header widths, a gap apart. */
+const META_COLS_W = HEADER_RESERVE.cost + GAP + HEADER_RESERVE.ctx + GAP + HEADER_RESERVE.modality;
+
+/**
+ * How many columns the picker's text uses in a terminal this wide. A window is filled edge to edge. A wider
+ * screen would put its whole width between a name and its metadata, so there the text stops at WINDOW_W until
+ * the terminal's midline passes the Price, Ctx and Modality columns, and from then on those stay centred on it.
+ * Only the rules run the full width.
+ */
+export function contentWidth(termWidth: number): number {
+	if (termWidth <= WINDOW_W) return termWidth;
+	return Math.max(WINDOW_W, Math.ceil((termWidth + META_COLS_W) / 2));
 }
 
 /**
