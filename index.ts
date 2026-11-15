@@ -16,15 +16,13 @@
  *
  * Usage:
  *   /models          — open the categorized picker
- *   Ctrl+\           — keyboard shortcut (default; configurable, see below)
  *
  * Note: /model is a built-in pi command and cannot be overridden.
  *
- * Configuring the shortcut:
+ * A keyboard shortcut (none by default):
  *   Add to ~/.pi/agent/settings.json:
  *     { "pi-picks": { "shortcut": "alt+m" } }
- *   Accepts a string, an array of strings (binds multiple keys), or `false`
- *   to disable the shortcut entirely (the /models command still works).
+ *   Accepts a string or an array of strings (binds multiple keys).
  */
 
 import { readFileSync } from "node:fs";
@@ -44,8 +42,6 @@ import {
 import type { Column, Measure, SortContext, SortMode, TabKind } from "./table.ts";
 
 // ─── settings ───────────────────────────────────────────────────────────────
-
-const DEFAULT_SHORTCUT = "ctrl+\\";
 
 const SETTINGS_KEY = "pi-picks";
 
@@ -68,13 +64,12 @@ function readSetting(setting: string): unknown {
 	}
 }
 
-/** Accept a key, multiple keys, or false/[] to disable. */
-function resolveShortcuts(setting = "shortcut", fallback = DEFAULT_SHORTCUT): string[] {
+/** The keys the user chose to open the picker with: one, several, or (the default) none. */
+function resolveShortcuts(setting = "shortcut"): string[] {
 	const shortcut = readSetting(setting);
-	if (shortcut === false) return [];
 	if (typeof shortcut === "string") return shortcut ? [shortcut] : [];
 	if (Array.isArray(shortcut)) return shortcut.filter((s): s is string => typeof s === "string" && s.length > 0);
-	return [fallback];
+	return [];
 }
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -535,7 +530,7 @@ class ModelPickerComponent {
 		const status = theme.fg("dim", truncateToWidth(details, width));
 
 		// ── help bar + right-justified modality legend ──────────────────
-		const leftHelp = "  ↑↓ Enter · Tab · Ctrl+F/X fav · Ctrl+S sort · Esc";
+		const leftHelp = "  Enter select · Ctrl+F/X fav · Ctrl+S sort · Tab · Esc";
 		const legend = MODALITY_LEGEND.map((m) => theme.fg(m.color, `[${m.code}]`) + theme.fg("dim", ` ${m.label}`)).join(" ");
 		const legendW = visibleWidth(legend);
 		// The legend stays whole and the keys give way, down to 20 columns of them; narrower, the legend goes.

@@ -6,6 +6,8 @@
 - The frame (which lines there are, the rules, the title line, ten rows, how wide the text is) moved into `frame.ts`, a file pi-picks shares with pi-hashline so the two pickers stay alike
 - `PageUp` and `PageDown` move ten models, as `Shift+↑` and `Shift+↓` do
 - The keys the picker shares with pi-hashline (tabs, ten-row jumps, sort, clear, favorite) are named once in `frame.ts`, with the rule for which keys a new tool may take
+- No keyboard shortcut is bound by default any more (it was `Ctrl+\`); `/models` opens the picker, and `pi-picks.shortcut` in `settings.json` still binds a key of your choice
+- The key bar reads `Enter select · Ctrl+F/X fav · Ctrl+S sort · Tab · Esc`, in the same order as pi-hashline's
 
 ## 1.5.0 — 2026-11-15
 

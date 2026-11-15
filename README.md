@@ -20,7 +20,7 @@ The first tab, **Favorites**, is the picker's own list, independent of pi's nati
 
   (1/1) anthropic/claude-sonnet
 ───────────────────────────────────────────────────────────────────
-  ↑↓ Enter · Tab · Ctrl+F/X fav · Ctrl+S sort · Esc    [T] thinking [V] vision [G] generation [S] synthesis
+  Enter select · Ctrl+F/X fav · Ctrl+S sort · Tab · Esc    [T] thinking [V] vision [G] generation [S] synthesis
 ───────────────────────────────────────────────────────────────────
 ```
 
@@ -60,13 +60,12 @@ pi install git:github.com/JangMan-J/pi-picks
 | Trigger | Description |
 |---------|-------------|
 | `/models` | Open the categorized picker |
-| Ctrl+\ | Keyboard shortcut (default, configurable) |
 
 > **Note:** `/model` is a built-in pi command and cannot be overridden. Use `/models` (with an `s`) for this picker. The built-in `/model` (flat search) continues to work as normal.
 
-### Configuring the shortcut
+### Adding a shortcut
 
-By default the picker binds `Ctrl+\`. Override it in `~/.pi/agent/settings.json`:
+The picker binds no key by default. To open it with one, name the key in `~/.pi/agent/settings.json`:
 
 ```json
 {
@@ -80,7 +79,6 @@ By default the picker binds `Ctrl+\`. Override it in `~/.pi/agent/settings.json`
 
 - a single key string, e.g. `"alt+m"`
 - an array of key strings to bind multiple keys, e.g. ["alt+m", "ctrl+\\"]
-- `false` to disable the shortcut entirely (the `/models` command still works)
 
 See pi's [keybindings docs](https://github.com/badlogic/pi-mono) for the key identifier format (`ctrl`, `shift`, `alt` modifiers combined with letters, digits, or symbols).
 
