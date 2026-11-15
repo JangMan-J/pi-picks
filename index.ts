@@ -35,8 +35,10 @@ import { Input, Key, fuzzyFilter, matchesKey, truncateToWidth, visibleWidth } fr
 import type { KeyId } from "@earendil-works/pi-tui";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { Favorites } from "./favorites.ts";
+import { FRAME_ROWS, contentWidth, frameLines, spread } from "./frame.ts";
+import type { FrameStyle } from "./frame.ts";
 import {
-	MODALITY_LEGEND, activeColumn, contentWidth, effectiveSort, headerSegments, layoutTable, modalitySlots, nextSortState,
+	META_COLS_W, MODALITY_LEGEND, activeColumn, effectiveSort, headerSegments, layoutTable, modalitySlots, nextSortState,
 	pinsCurrentFirst, providerLabel, rowParts, sortRows, visibleColumnsOf, windowStart,
 } from "./table.ts";
 import type { Column, Measure, SortContext, SortMode, TabKind } from "./table.ts";
@@ -450,7 +452,7 @@ class ModelPickerComponent {
 
 	render(termWidth: number, theme: any): string[] {
 		// On a wide screen the text stops short of the right edge; only the rules span the terminal.
-		const width = contentWidth(termWidth);
+		const width = contentWidth(termWidth, META_COLS_W);
 		if (this.lastWidth !== width) {
 			const prevSelected = this.filteredRows[this.rowIndex];
 			this.lastWidth = width;
@@ -460,36 +462,30 @@ class ModelPickerComponent {
 				if (kept >= 0) this.rowIndex = kept;
 			}
 		}
-		const lines: string[] = [
-			theme.fg("accent", "─".repeat(termWidth)),
-			truncateToWidth(theme.fg("accent", theme.bold("  Select Model")), width),
-			theme.fg("border", "─".repeat(termWidth)),
-		];
-
-		// ── tab bar ──────────────────────────────────────────────────────
-		lines.push(this.renderTabs(width, theme));
+		// The lines are the suite's shared frame (frame.ts); this method supplies what goes on each.
+		const tabs = this.renderTabs(width, theme);
 
 		// ── search field ─────────────────────────────────────────────────
-		lines.push(theme.fg("border", "─".repeat(termWidth)));
 		const promptText = "  Search: ";
 		const prompt = theme.fg("muted", promptText);
 		const promptW = visibleWidth(promptText);
 		const inputLines = this.searchInput.render(Math.max(0, width - promptW));
-		lines.push(prompt + (inputLines[0] ?? ""));
+		const input = prompt + (inputLines[0] ?? "");
 
 		// ── column header (fixed geometry: every row of the tab) ─────────
-		const MAX_VISIBLE = 10;
+		const MAX_VISIBLE = FRAME_ROWS;
 		const rows = this.filteredRows;
 		const hasQuery = this.searchInput.getValue().trim() !== "";
 		const geometry = layoutTable(this.tabSource(this.currentTab()), width, this.crossProvider, measure);
 		const active = activeColumn(this.sortMode, this.sortCtx());
-		lines.push(headerSegments(geometry, active, measure)
+		const header = headerSegments(geometry, active, measure)
 			.map((seg) =>
 				seg.style === "active" ? theme.bold(theme.fg("accent", seg.text))
 				: seg.style === "arrow" ? theme.bold(theme.fg("warning", seg.text))
 				: seg.style === "header" ? theme.fg("accent", seg.text)
 				: seg.text)
-			.join(""));
+			.join("");
+		const lines: string[] = [];
 
 		// ── model list ───────────────────────────────────────────────────
 		const start = windowStart(this.rowIndex, rows.length, MAX_VISIBLE);
@@ -527,8 +523,6 @@ class ModelPickerComponent {
 				lines.push(this.renderRow(model, isSelected, isCurrent, geometry, theme, fuzzyHighlight));
 			}
 		}
-		// The empty-state message occupies one row; keep the count slot too.
-		for (let i = Math.max(1, visible.length); i < MAX_VISIBLE; i++) lines.push("");
 		const position = rows.length ? this.rowIndex + 1 : 0;
 		const selected = rows[this.rowIndex];
 		// On cross-provider tabs the bare id is ambiguous when several
@@ -536,25 +530,25 @@ class ModelPickerComponent {
 		const ref = selected ? (this.crossProvider ? `${selected.provider}/${selected.id}` : selected.id) : "";
 		const details = `  (${position}/${rows.length})${ref ? ` ${ref}` : ""}`;
 		// One line, always: truncate rather than wrap so the height never changes.
-		lines.push(theme.fg("dim", truncateToWidth(details, width)));
+		const status = theme.fg("dim", truncateToWidth(details, width));
 
 		// ── help bar + right-justified modality legend ──────────────────
-		lines.push(theme.fg("border", "─".repeat(termWidth)));
 		const leftHelp = "  ↑↓ Enter · Tab · Ctrl+F/X fav · Ctrl+S sort · Esc";
-		const legendPlain = `${MODALITY_LEGEND.map((m) => `[${m.code}] ${m.label}`).join(" ")}  `;
-		const legendStyled = `${MODALITY_LEGEND.map((m) => theme.fg(m.color, `[${m.code}]`) + theme.fg("dim", ` ${m.label}`)).join(" ")}${theme.fg("dim", "  ")}`;
-		const legendW = visibleWidth(legendPlain);
-		if (width >= legendW + 24) {
-			const leftTrunc = truncateToWidth(leftHelp, width - legendW - 2, "…");
-			const gap = " ".repeat(Math.max(2, width - visibleWidth(leftTrunc) - legendW));
-			lines.push(theme.fg("dim", leftTrunc) + gap + legendStyled);
-		} else {
-			lines.push(theme.fg("dim", truncateToWidth(leftHelp, width, "…")));
-		}
-		lines.push(theme.fg("accent", "─".repeat(termWidth)));
+		const legend = MODALITY_LEGEND.map((m) => theme.fg(m.color, `[${m.code}]`) + theme.fg("dim", ` ${m.label}`)).join(" ");
+		const legendW = visibleWidth(legend);
+		// The legend stays whole and the keys give way, down to 20 columns of them; narrower, the legend goes.
+		const keys =
+			(width >= legendW + 26
+				&& spread(theme.fg("dim", truncateToWidth(leftHelp, width - legendW - 4, "…")), legend, width, measure))
+			|| theme.fg("dim", truncateToWidth(leftHelp, width, "…"));
 
-		// Tiny terminal resizes must not emit over-wide prompts, markers, or wide glyphs.
-		return lines.map((line) => truncateToWidth(line, termWidth));
+		const style: FrameStyle = {
+			accent: (text) => theme.fg("accent", text),
+			bold: (text) => theme.bold(text),
+			border: (text) => theme.fg("border", text),
+		};
+		// The frame cuts every line to its width, so a tiny terminal never gets an over-wide prompt, marker, or glyph.
+		return frameLines({ title: "Select Model", tabs, input, header, rows: lines, status, keys }, width, termWidth, style, measure);
 	}
 
 	private renderTabs(width: number, theme: any): string {

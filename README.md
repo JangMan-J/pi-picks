@@ -11,9 +11,7 @@ The first tab, **Favorites**, is the picker's own list, independent of pi's nati
 ## Preview
 
 ```
-───────────────────────────────────────────────────────────────────
-  Select Model
-───────────────────────────────────────────────────────────────────
+─ Select Model ────────────────────────────────────────────────────
   Favorites │ All │ Anthropic │ Antigravity │ Fireworks │ Xai
 ───────────────────────────────────────────────────────────────────
   Search: > claude_

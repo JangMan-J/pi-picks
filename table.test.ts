@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
-	DROP_ORDER, META_COLUMNS, MODALITY_LEGEND, SORT_MODES, activeColumn, contentWidth, effectiveSort, fmtCtx, fmtModality,
+	DROP_ORDER, META_COLS_W, META_COLUMNS, MODALITY_LEGEND, SORT_MODES, activeColumn, effectiveSort, fmtCtx, fmtModality,
 	hasModality, headerSegments, layoutTable, modalitySlots, nextSort, nextSortState, pinsCurrentFirst, rowParts,
 	sortRows, visibleColumnsOf, windowStart,
 } from "./table.ts";
 import type { Geometry, SortMode, TabKind, TableModel } from "./table.ts";
+import { FRAME_ROWS, contentWidth as frameContentWidth, frameLines } from "./frame.ts";
+
+const contentWidth = (termWidth: number) => frameContentWidth(termWidth, META_COLS_W);
 
 const m = (
 	provider: string,
@@ -128,6 +131,18 @@ describe("column geometry & styling", () => {
 		assert.equal(g.width, 140);
 		assert.ok(row(g, provider.at(-1)!).endsWith("[T][V][G][S]") && row(g, provider.at(-1)!).length === 140);
 		assert.equal((140 - 28 + 140) / 2, 252 / 2);
+	});
+
+	it("draws through the shared frame: the title in the top rule, ten rows, rules to the terminal's edge", () => {
+		const plain = { accent: (t: string) => t, bold: (t: string) => t, border: (t: string) => t };
+		const cells = { width: (t: string) => [...t].length, truncate: (t: string, w: number) => [...t].slice(0, Math.max(0, w)).join("") };
+		const parts = { title: "Select Model", tabs: "  All", input: "  Search: ", header: "  Model", rows: ["▶ one"], status: "  (1/1) one", keys: "  Esc" };
+		const lines = frameLines(parts, 128, 200, plain, cells);
+		assert.equal(lines.length, 9 + FRAME_ROWS);
+		assert.equal(lines[0], `─ Select Model ${"─".repeat(185)}`);
+		assert.deepEqual([lines[2], lines[16], lines[18]], Array(3).fill("─".repeat(200)));
+		assert.deepEqual(lines.slice(5, 15), ["▶ one", ...Array(9).fill("")]);
+		assert.equal(lines[15], "  (1/1) one");
 	});
 
 	it("measures the whole tab, not the first window", () => {

@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- The title now sits in the top rule (`─ Select Model ─────`) instead of on its own line between two rules, which makes the picker two lines shorter
+- The frame (which lines there are, the rules, the title line, ten rows, how wide the text is) moved into `frame.ts`, a file pi-picks shares with pi-hashline so the two pickers stay alike
+
 ## 1.5.0 — 2026-11-15
 
 - Replace the blank line under Search with an accent-colored column header row (Model, Provider on Favorites and All, Price, Ctx, Modality), collapsing Thinking and Vision into fixed-lane color-coded `[T][V][G][S]` modality badges with a right-justified legend on the bottom bar. Column widths are measured over the whole tab, so headers and cells never shift while scrolling, filtering, or sorting; on narrow terminals Modality, Ctx, then Price drop together with their headers

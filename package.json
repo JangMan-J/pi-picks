@@ -10,6 +10,7 @@
     "index.ts",
     "favorites.ts",
     "table.ts",
+    "frame.ts",
     "scripts/install.js",
     "SKILL.md",
     "CHANGELOG.md",

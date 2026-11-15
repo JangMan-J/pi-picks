@@ -359,21 +359,11 @@ export interface Geometry {
 	meta: { column: MetaColumn; x: number; w: number }[];
 }
 
-/** Widest terminal the picker fills edge to edge. */
-const WINDOW_W = 128;
-/** Price, Ctx and Modality at their header widths, a gap apart. */
-const META_COLS_W = HEADER_RESERVE.cost + GAP + HEADER_RESERVE.ctx + GAP + HEADER_RESERVE.modality;
-
 /**
- * How many columns the picker's text uses in a terminal this wide. A window is filled edge to edge. A wider
- * screen would put its whole width between a name and its metadata, so there the text stops at WINDOW_W until
- * the terminal's midline passes the Price, Ctx and Modality columns, and from then on those stay centred on it.
- * Only the rules run the full width.
+ * Price, Ctx and Modality at their header widths, a gap apart: the columns the frame keeps on the terminal's
+ * midline on a wide screen (`contentWidth` in frame.ts).
  */
-export function contentWidth(termWidth: number): number {
-	if (termWidth <= WINDOW_W) return termWidth;
-	return Math.max(WINDOW_W, Math.ceil((termWidth + META_COLS_W) / 2));
-}
+export const META_COLS_W = HEADER_RESERVE.cost + GAP + HEADER_RESERVE.ctx + GAP + HEADER_RESERVE.modality;
 
 /**
  * Column geometry for a tab. Pass every row of the tab (not the visible

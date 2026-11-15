@@ -35,6 +35,19 @@ check("table.ts parses (Node type stripping)", () => {
 	run(process.execPath, ["--check", "table.ts"]);
 });
 
+check("frame.ts parses (Node type stripping)", () => {
+	run(process.execPath, ["--check", "frame.ts"]);
+});
+
+// frame.ts is one file kept as an identical copy in each tool of the suite. Where a sibling checkout sits beside
+// this one (a development machine, not CI), the copies must match.
+check("frame.ts matches the copies in sibling checkouts", () => {
+	const mine = readFileSync(join(root, "frame.ts"), "utf8");
+	const siblings = ["../pi-hashline/frame.ts", "../pi-speech/src/pi/frame.ts"].map((p) => join(root, p)).filter(existsSync);
+	const differing = siblings.filter((p) => readFileSync(p, "utf8") !== mine);
+	if (differing.length) throw new Error(`differs from ${differing.join(", ")}: copy the newer file over the older`);
+});
+
 check("favorites tests pass", () => {
 	run(process.execPath, ["--test", "favorites.test.ts"]);
 });
