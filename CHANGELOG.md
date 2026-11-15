@@ -4,6 +4,8 @@
 
 - The title now sits in the top rule (`─ Select Model ─────`) instead of on its own line between two rules, which makes the picker two lines shorter
 - The frame (which lines there are, the rules, the title line, ten rows, how wide the text is) moved into `frame.ts`, a file pi-picks shares with pi-hashline so the two pickers stay alike
+- `PageUp` and `PageDown` move ten models, as `Shift+↑` and `Shift+↓` do
+- The keys the picker shares with pi-hashline (tabs, ten-row jumps, sort, clear, favorite) are named once in `frame.ts`, with the rule for which keys a new tool may take
 
 ## 1.5.0 — 2026-11-15
 

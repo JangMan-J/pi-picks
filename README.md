@@ -99,7 +99,7 @@ Every tab uses the same fuzzy search; tabs only narrow which models it runs over
 | Key | Action |
 |-----|--------|
 | `↑` / `↓` | Navigate models (wraps around) |
-| `Shift+↑` / `Shift+↓` | Move up / down 10 models, stopping at the first or last result |
+| `Shift+↑` / `Shift+↓`, or `PageUp` / `PageDown` | Move up / down 10 models, stopping at the first or last result |
 | `Tab` / `Shift+Tab` | Switch tab (Favorites, All, then providers); with a query active, provider tabs with no matches are skipped |
 | `Ctrl+F` | Toggle the selected model in Favorites, on any tab |
 | `Ctrl+X` | Remove favorites contained in the active tab (every favorite on Favorites; only the relevant provider's favorites on a provider tab) |

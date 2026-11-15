@@ -35,7 +35,7 @@ import { Input, Key, fuzzyFilter, matchesKey, truncateToWidth, visibleWidth } fr
 import type { KeyId } from "@earendil-works/pi-tui";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { Favorites } from "./favorites.ts";
-import { FRAME_ROWS, contentWidth, frameLines, spread } from "./frame.ts";
+import { FRAME_ROWS, KEYS, contentWidth, frameLines, spread } from "./frame.ts";
 import type { FrameStyle } from "./frame.ts";
 import {
 	META_COLS_W, MODALITY_LEGEND, activeColumn, effectiveSort, headerSegments, layoutTable, modalitySlots, nextSortState,
@@ -79,6 +79,8 @@ function resolveShortcuts(setting = "shortcut", fallback = DEFAULT_SHORTCUT): st
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
+/** Whether the input is one of the keys the suite's pickers share (`KEYS` in frame.ts). */
+const pressed = (data: string, keys: readonly string[]) => keys.some((key) => matchesKey(data, key as KeyId));
 const measure: Measure = { width: visibleWidth, truncate: (text, width) => truncateToWidth(text, width) };
 
 // ─── component ──────────────────────────────────────────────────────────────
@@ -378,33 +380,33 @@ class ModelPickerComponent {
 
 	handleInput(data: string): void {
 		// Favorite toggle works on every tab; the model stays in its provider tab.
-		if (matchesKey(data, Key.ctrl("f"))) {
+		if (pressed(data, KEYS.mark)) {
 			this.toggleSelectedFavorite();
 			return;
 		}
-		if (matchesKey(data, Key.ctrl("s"))) {
+		if (pressed(data, KEYS.sort)) {
 			this.cycleSort();
 			return;
 		}
-		if (matchesKey(data, Key.ctrl("x"))) {
+		if (pressed(data, KEYS.clearTab)) {
 			this.clearFavoritesInTab();
 			return;
 		}
-		if (matchesKey(data, Key.tab)) {
+		if (pressed(data, KEYS.nextTab)) {
 			this.switchCategory(1);
 			return;
 		}
-		if (matchesKey(data, Key.shift("tab"))) {
+		if (pressed(data, KEYS.prevTab)) {
 			this.switchCategory(-1);
 			return;
 		}
-		// Shift+↑ / ↓ — skip ten rows without wrapping
-		if (matchesKey(data, Key.shift("up"))) {
-			this.rowIndex = Math.max(0, this.rowIndex - 10);
+		// Shift+↑ / ↓ or PageUp / PageDown — skip ten rows without wrapping
+		if (pressed(data, KEYS.pageUp)) {
+			this.rowIndex = Math.max(0, this.rowIndex - FRAME_ROWS);
 			return;
 		}
-		if (matchesKey(data, Key.shift("down"))) {
-			this.rowIndex = Math.max(0, Math.min(this.filteredRows.length - 1, this.rowIndex + 10));
+		if (pressed(data, KEYS.pageDown)) {
+			this.rowIndex = Math.max(0, Math.min(this.filteredRows.length - 1, this.rowIndex + FRAME_ROWS));
 			return;
 		}
 		// ↑ / ↓ — navigate the list with wraparound

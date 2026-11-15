@@ -28,6 +28,37 @@ export const FRAME_ROWS = 10;
 /** Columns kept between a line's text and a note on its right, and between that note and the text edge. */
 const NOTE_GAP = 2;
 
+/**
+ * The keys every picker of the suite gives the same meaning, as pi-tui key ids. A tool matches these instead of
+ * writing the keys out, binds its own actions to other keys, and never gives one of these another meaning.
+ *
+ * Not listed because no tool matches them itself: ↑ and ↓ move and wrap around; Enter is the selected row's main
+ * action; Esc goes back one level and, at the top, closes; ← and → switch tabs while the text field is empty,
+ * and change the value of a row that has one to step through.
+ *
+ * Typing goes to the text field, so a tool's own actions are Ctrl chords or function keys. Free for them: Ctrl+N,
+ * Ctrl+O, Ctrl+P, Ctrl+T, Ctrl+L and F1 to F12. Not usable: Ctrl+C (Pi cancels with it); Ctrl+H, Ctrl+I, Ctrl+J,
+ * Ctrl+M and Ctrl+[ (terminals send them for Backspace, Tab, Enter and Esc); Ctrl+Z; and the keys the text field
+ * edits with (Ctrl+A, B, E, K, U, W, Y and Alt+B, D, F, Y).
+ */
+export const KEYS = {
+	/** Ten rows up or down, without wrapping. */
+	pageUp: ["shift+up", "pageUp"],
+	pageDown: ["shift+down", "pageDown"],
+	nextTab: ["tab"],
+	prevTab: ["shift+tab"],
+	/** The next sort order; the column that governs it carries the arrow. */
+	sort: ["ctrl+s"],
+	/** A floating pane about the selected row. */
+	detail: ["ctrl+d"],
+	/** Put the selected row back to its default. */
+	reset: ["ctrl+r"],
+	/** Clear what the user set on every row of the current tab. */
+	clearTab: ["ctrl+x"],
+	/** Mark or unmark the selected row, as a favorite is. */
+	mark: ["ctrl+f"],
+} as const;
+
 export interface Measure {
 	/** Columns the text takes on screen, styling excluded. */
 	width(text: string): number;

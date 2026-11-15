@@ -16,7 +16,7 @@ Open the categorized model picker with `/models` or `Ctrl+\`.
 | Key | Action |
 |-----|--------|
 | `↑` / `↓` | Navigate models (wraps around) |
-| `Shift+↑` / `Shift+↓` | Move ten results, stopping at either end |
+| `Shift+↑` / `Shift+↓`, or `PageUp` / `PageDown` | Move ten results, stopping at either end |
 | `Ctrl+F` | Toggle the selected model in Favorites, on any tab (keeps it in its provider tab) |
 | `Ctrl+X` | Remove favorites contained in the active tab |
 | `Ctrl+S` | Cycle `▲` then `▼` across visible columns left to right (Model, Provider, Price, Ctx, Modality, plus tab default when distinct) |
